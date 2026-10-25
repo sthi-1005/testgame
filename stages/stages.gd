@@ -11,6 +11,8 @@ const DEFAULT := "saltrock"
 const LIST := [
 	{ "id": "saltrock", "name": "Saltrock Mines", "blurb": "A lamp-lit mine run by thieves. Tunnels, carts and Gorrak the Overseer.",
 		"level": "res://scripts/level.gd", "world": "res://scripts/world_builder.gd" },
+	{ "id": "skytemple", "name": "Skyroot Spire", "blurb": "Climb a giant tree through the canopy to a temple in the open sky. Hollowbark waits at the top.",
+		"level": "res://stages/skytemple/sky_level.gd", "world": "res://stages/skytemple/sky_builder.gd" },
 ]
 
 static func info(id: String) -> Dictionary:
