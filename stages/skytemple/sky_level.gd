@@ -214,6 +214,13 @@ func checkpoints() -> Array:
 func intro_text() -> String:
 	return "Sunlight pours through the leaves. Far above, the Temple of the Open Sky floats on the wind."
 
+func victory_title() -> String:
+	return "Hollowbark, the Temple Warden, is defeated"
+
+func loot_lines() -> Array:
+	return ["Under the altar's wind orb you find the Stormcrown Circlet, a Skyroot Seedling and 16 silver.",
+		"Loot: Stormcrown Circlet, Skyroot Seedling, 16 silver"]
+
 func boss_script(boss: String, sim) -> Object:
 	if boss == "hollowbark":
 		return HollowbarkFight.new(sim)
