@@ -1,0 +1,51 @@
+# Builds the web export on every push to main and publishes it to GitHub Pages,
+# so the game plays in a phone browser at https://<owner>.github.io/<repo>/.
+# One-time setup: repo Settings > Pages > Source: "GitHub Actions".
+name: Web build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.7.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export templates
+        # the image keeps them under /root, but Actions runs the container with HOME=/github/home
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates
+          ln -sfn /root/.local/share/godot/export_templates/4.7.2.stable ~/.local/share/godot/export_templates/4.7.2.stable
+      - name: Import assets
+        run: godot --headless --import
+      - name: Export web
+        run: |
+          mkdir -p export/web
+          godot --headless --export-release "Web" export/web/index.html
+          ls -la export/web
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: export/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

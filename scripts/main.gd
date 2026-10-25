@@ -12,6 +12,7 @@ func _ready() -> void:
 	if net and net.has_method("is_server_launch") and net.is_server_launch():
 		return
 	_parse_args()
+	Quality.setup()
 	Cursors.set_kind("pointer")
 	if args.has("class"):
 		cls = args["class"]

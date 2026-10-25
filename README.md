@@ -58,6 +58,27 @@ godot --headless -s tools/bottest.gd -- sellsword   # bot plays the slice as a c
 godot --path . --rendering-driver opengl3 -s tools/shots.gd   # renders review stills to user://
 ```
 
+## Phones and the browser
+
+The web export (`export_presets.cfg`, preset "Web") runs on phones and desktop browsers. On every push to
+`main`, `.github/workflows/web.yml` builds it and publishes it to GitHub Pages (enable once: Settings > Pages >
+Source: GitHub Actions). The download is about 24 MB gzipped.
+
+- `mobile/quality.gd` (`Quality`): two tiers. **high** is desktop Forward+ with everything on. **mobile** is
+  Compatibility (web, phones): 75% 3D resolution, 4 torch lights with 1 shadow, no volumetric fog or SSAO. It
+  also turns on touch controls on touch devices and scales the UI up so buttons are thumb-sized.
+- `mobile/touch_controls.gd`: floating thumbstick on the left 40% of the screen, drag elsewhere to turn the
+  camera, pinch to zoom, tap a unit to target it, hotbar moved bottom-right, Target and Loot buttons.
+- Prop normal and ORM maps import at 64 px: the toon shader only reads albedo, and full-size copies made the
+  web download 150 MB.
+- Web multiplayer: a page served over HTTPS can only join a `wss://` server, so a dedicated server for browser
+  players needs TLS (or a proxy such as Cloudflare in front of it).
+
+```
+xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 1688x780 -s tools/touch_test.gd -- --class sellsword --phone
+godot --path . -- --touch --phone       # try the touch layout on a desktop (mouse does not drive it; use a touch screen)
+```
+
 ## Credits
 
 All art is CC0: KayKit Adventurers, Dungeon Remastered and Character Animations by Kay Lousberg (kaylousberg.com),
