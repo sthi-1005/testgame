@@ -25,7 +25,6 @@ var target_btn: Button
 var loot_btn: Button
 var again_btn: Button
 var full_btn: Button
-var rotate_note: Control
 var laid_out := false
 
 func _init(g: Game) -> void:
@@ -54,8 +53,6 @@ func _ready() -> void:
 	_place(loot_btn, Vector2(1, 1), Vector2(-32 - BTN.x * 2, -96 - BTN.y))
 	_place(full_btn, Vector2(1, 0), Vector2(-88, 12))
 	_place(again_btn, Vector2(0.5, 1), Vector2(-100, -96))
-	rotate_note = _rotate_note()
-	root.add_child(rotate_note)
 
 func _exit_tree() -> void:
 	Input.emulate_mouse_from_touch = true
@@ -91,22 +88,6 @@ func _place(c: Control, anchor: Vector2, off: Vector2, size := Vector2(-1, -1)) 
 	c.offset_top = off.y
 	c.offset_right = off.x + size.x
 	c.offset_bottom = off.y + size.y
-
-func _rotate_note() -> Control:
-	var bg := ColorRect.new()
-	bg.color = Color(0.04, 0.03, 0.05, 0.94)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_STOP
-	var l := Label.new()
-	l.text = "Turn your phone sideways to play."
-	l.set_anchors_preset(Control.PRESET_FULL_RECT)
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD
-	l.add_theme_font_size_override("font_size", 26)
-	bg.add_child(l)
-	bg.visible = false
-	return bg
 
 func _toggle_fullscreen() -> void:
 	var fs := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
@@ -146,7 +127,6 @@ func _process(_delta: float) -> void:
 	loot_btn.visible = near_chest
 	target_btn.visible = game.state == "play"
 	again_btn.visible = game.state == "victory"
-	rotate_note.visible = Quality.phone and Quality.is_portrait()
 	var p := game.hud.prompt_label
 	if p.text.begins_with("Press F"):
 		p.text = p.text.replace("Press F", "Tap Loot")
