@@ -101,6 +101,14 @@ func intro_text() -> String:
 func boss_script(_boss: String, _sim) -> Object:
 	return null
 
+## The victory screen's title and the strongbox loot ([chat line, banner]). Client side.
+func victory_title() -> String:
+	return "Gorrak the Overseer is defeated"
+
+func loot_lines() -> Array:
+	return ["You pry open the Overseer's strongbox: Gorrak's Iron Collar, a Foreman's Signet and 14 silver.",
+		"Loot: Gorrak's Iron Collar, Foreman's Signet, 14 silver"]
+
 ## Called once per sim tick, for stage set pieces.
 func tick(_sim, _dt: float) -> void:
 	pass

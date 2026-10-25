@@ -27,6 +27,7 @@ Click a unit to target it, right-click an enemy to attack, Tab for the next enem
 | `scripts/bot.gd` (`Bot`) | Drives a party member through the slice (tests, `--bot`). |
 | `scripts/look.gd`, `assets.gd`, `world_builder.gd`, `cave.gd`, `unit_view.gd` | Client visuals: toon shading, model loading and animation retargeting, the dungeon, unit views. |
 | `main.tscn`, `scripts/main.gd`, `game.gd`, `hud.gd`, `cursors.gd`, `local_net.gd` | Title screen, the client game scene (camera, controls, effects), the HUD, context cursors, and the in-process server used for solo play. |
+| `stages/coast/` | Tidecrown Ruins: a sunlit coast (beach, colonnade, causeway, flooded sanctum) and its boss, Ondrak the Brinewarden. `CoastLevel` (layout, wading heights, spawns), `CoastWorld` (terrain, sea, ruins), `CoastBoss`, `CoastData`. |
 | `tools/` | Headless tests and render scripts (see below). |
 | `assets/` | CC0 models: KayKit (Kay Lousberg) and Quaternius. |
 
@@ -101,6 +102,8 @@ about 22 KB/s down and under 1 KB/s up per player.
 ```
 godot --headless -s tools/bottest.gd -- sellsword   # bot plays the slice as a class (sellsword|cleric|mage)
 godot --path . --rendering-driver opengl3 -s tools/shots.gd   # renders review stills to user://
+godot --headless -s tools/bottest.gd -- mage 600 x 7 --stage coast   # the same bot on another stage
+godot --path . --rendering-driver vulkan -s stages/coast/tools/coast_shots.gd -- _a [shot]   # Tidecrown Ruins stills
 ```
 
 ## Phones and the browser
