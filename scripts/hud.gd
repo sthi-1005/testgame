@@ -23,6 +23,7 @@ var banner_t := 0.0
 var zone_label: Label
 var zone_t := 0.0
 var prompt_label: Label
+var help_label: Label
 var end_panel: Control
 var bubbles: Array = [] # [label3d, t]
 var font_big := 30
@@ -92,6 +93,7 @@ func _ready() -> void:
 	help.offset_bottom = -8
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	root.add_child(help)
+	help_label = help
 
 func _build_hotbar(cls: String) -> void:
 	built_for = cls
