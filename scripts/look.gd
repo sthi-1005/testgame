@@ -171,7 +171,7 @@ static func apply(root: Node, ink_w := 0.025, tint := Color.WHITE) -> void:
 
 # ------------------------------------------------------------------ colour grade per zone
 const GRADE := {
-	"dark": { "fog": 0.016, "fog_c": Color(0.03, 0.06, 0.07), "amb": 0.75, "amb_c": Color(0.4, 0.6, 0.72), "exp": 1.6, "con": 1.2, "sat": 0.85,
+	"dark": { "fog": 0.016, "fog_c": Color(0.03, 0.06, 0.07), "amb": 0.6, "amb_c": Color(0.62, 0.55, 0.5), "exp": 1.3, "con": 1.2, "sat": 0.85,
 		"torch": Color(1, 0.55, 0.22) },
 	"arena": { "fog": 0.008, "fog_c": Color(0.1, 0.08, 0.09), "amb": 0.8, "amb_c": Color(0.85, 0.82, 0.95), "exp": 1.3, "con": 1.08, "sat": 1.15,
 		"torch": Color(1, 0.62, 0.3) },
@@ -190,6 +190,16 @@ static func make_environment() -> Environment:
 	e.glow_bloom = 0.05
 	e.glow_hdr_threshold = 1.0
 	e.adjustment_enabled = true
+	# Forward+ only (ignored by the web/Compatibility build): volumetric fog, ambient occlusion, GI
+	e.volumetric_fog_enabled = true
+	e.volumetric_fog_density = 0.022
+	e.volumetric_fog_albedo = Color(0.7, 0.62, 0.55)
+	e.volumetric_fog_length = 48.0
+	e.volumetric_fog_ambient_inject = 0.15
+	e.ssao_enabled = true
+	e.ssao_radius = 1.6
+	e.ssao_intensity = 2.5
+	e.sdfgi_enabled = false
 	return e
 
 static func grade(e: Environment, k: float) -> void:

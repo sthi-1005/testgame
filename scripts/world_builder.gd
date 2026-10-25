@@ -84,11 +84,18 @@ func build() -> void:
 				mi.mesh = quad
 				mi.material_override = dirt
 				_place(mi, Level.W(x, z), 0.0, 1.0)
-	# ceilings: one slab per carved rectangle at that zone's height
+	# ceilings: flat over the built hall, rough sagging rock over the mine
 	var ceil_mat := Look.toon(Color(0.42, 0.36, 0.31), dirt_tex(), 0.0)
+	var cave := Cave.new()
+	var rock := Look.toon(Color(1, 1, 1), rock_tex(), 0.04)
+	var cave_st := {} # zone -> SurfaceTool, one mesh per zone keeps draw calls low and lights local
 	for r in lv.rects:
 		var w: float = (r[2] - r[0] + 1) * T + 2
 		var d: float = (r[3] - r[1] + 1) * T + 2
+		if _is_cave(r[4]):
+			cave.ceiling(_cave_tool(cave_st, r[4]), r[0] * T - 1.5, r[1] * T - 1.5, (r[2] + 1) * T + 1.5, (r[3] + 1) * T + 1.5, lv.zone_h(r[4]) + 0.6)
+			_stalactites(r, lv.zone_h(r[4]) + 0.6, cave)
+			continue
 		var mi := MeshInstance3D.new()
 		var pm := PlaneMesh.new()
 		pm.size = Vector2(w, d)
@@ -100,9 +107,21 @@ func build() -> void:
 	for e in lv.decor:
 		match e.kind:
 			"wall":
-				for k in e.courses:
-					_place(Assets.prop("dungeon-wall"), e.pos + Vector3(0, k * 4.0, 0), e.rot, 1.0)
+				var c: Vector3 = e.pos - Vector3(e.dx, 0, e.dz) * (T / 2 + 0.5)
+				var zn := lv.zone_at(c.x, c.z)
+				if _is_cave(zn):
+					var m: Vector3 = c + Vector3(e.dx, 0, e.dz) * (T / 2)
+					var along := Vector3(absf(e.dz), 0, absf(e.dx))
+					cave.wall(_cave_tool(cave_st, zn), m - along * T / 2, m + along * T / 2, -Vector3(e.dx, 0, e.dz), lv.zone_h(zn) + 0.6)
+				else:
+					for k in e.courses:
+						_place(Assets.prop("dungeon-wall"), e.pos + Vector3(0, k * 4.0, 0), e.rot, 1.0)
 			"prop":
+				if e.model == "dungeon-pillar" and _cave_corner(e.pos):
+					continue # bare rock instead of masonry columns in the mine
+				if e.model == "dungeon-pillar" and _is_cave(lv.zone_at(e.pos.x, e.pos.z)):
+					_place(Assets.prop("q_rock_tall", 0.04), e.pos, e.rot, Vector3(2.4, 3.2, 2.4))
+					continue
 				_place(Assets.prop(e.model), e.pos, e.rot, e.scale)
 			"timber":
 				_box(e.pos, e.scale, wood, e.rot)
@@ -128,12 +147,31 @@ func build() -> void:
 				m.disable_fog = true
 				mi.material_override = m
 				_place(mi, e.pos, PI, 1.0)
+				# daylight pouring in through the mine mouth: a shadowed spot that lights the fog
+				var sp := SpotLight3D.new()
+				sp.light_color = Color(0.75, 0.85, 1.0)
+				sp.light_energy = 6.0
+				sp.spot_range = 40.0
+				sp.spot_angle = 28.0
+				sp.shadow_enabled = true
+				sp.light_volumetric_fog_energy = 3.0
+				_place(sp, e.pos + Vector3(0, 6, 3), 0.0, 1.0)
+				sp.transform = sp.transform.looking_at(e.pos + Vector3(0, 0, -14))
 			"rails":
 				_build_rails(e.pos.x, e.x1, e.pos.z)
 			"bell":
 				_build_bell(e.pos)
 	for p in lv.cart_starts():
 		cart_nodes.append(_build_cart(p))
+	for zn in cave_st:
+		var st: SurfaceTool = cave_st[zn]
+		st.generate_normals() # not indexed, so every facet stays flat: chunky toon rock
+		var mi := MeshInstance3D.new()
+		mi.mesh = st.commit()
+		mi.material_override = rock
+		mi.name = "Cave_" + zn
+		root.add_child(mi)
+	_dress()
 
 func fire_at(p: Vector3, size: float) -> void:
 	var ps := CPUParticles3D.new()
@@ -265,6 +303,7 @@ func _build_bell(p: Vector3) -> void:
 class LightPool:
 	var lights: Array[OmniLight3D] = []
 	var sources: Array
+	var shadow_count := 3
 	func _init(parent: Node3D, srcs: Array, n := 8) -> void:
 		sources = srcs
 		for i in n:
@@ -283,9 +322,152 @@ class LightPool:
 				continue
 			var s: Dictionary = sorted[i]
 			l.visible = true
+			l.shadow_enabled = i < shadow_count
 			l.position = s.pos
 			l.light_color = s.color
 			l.omni_range = s.range
 			# a little flicker on the flames
 			var fl := 1.0 + (sin(t * 11.0 + i * 1.7) * 0.05 + sin(t * 23.0 + i) * 0.04 if s.get("flicker", true) else 0.0)
 			l.light_energy = s.energy * fl
+
+static func _is_cave(zone: String) -> bool:
+	return zone != "hall" and zone != "gate" and zone != ""
+
+func _cave_tool(d: Dictionary, zone: String) -> SurfaceTool:
+	if not d.has(zone):
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		d[zone] = st
+	return d[zone]
+
+func _cave_corner(p: Vector3) -> bool:
+	var x := roundi(p.x / Level.T)
+	var z := roundi(p.z / Level.T)
+	if not is_equal_approx(p.x, x * Level.T) or not is_equal_approx(p.z, z * Level.T):
+		return false
+	for c in [[x - 1, z - 1], [x, z - 1], [x - 1, z], [x, z]]:
+		if c[0] >= 0 and c[1] >= 0 and c[0] < Level.GW and c[1] < Level.GH and lv.cell(c[0], c[1]):
+			if not _is_cave(lv.zone_of[c[1] * Level.GW + c[0]]):
+				return false
+	return true
+
+static func rock_tex() -> Texture2D:
+	if not _tex.has("rock"):
+		_tex.rock = Cave.rock_tex()
+	return _tex.rock
+
+func _stalactites(r: Array, h: float, cave: Cave) -> void:
+	var T := Level.T
+	var m := Look.toon(Color(0.85, 0.82, 0.8), rock_tex(), 0.03)
+	var n := int((r[2] - r[0] + 1) * (r[3] - r[1] + 1) * 1.2)
+	for i in n:
+		var x := randf_range(r[0] * T + 0.5, (r[2] + 1) * T - 0.5)
+		var z := randf_range(r[1] * T + 0.5, (r[3] + 1) * T - 0.5)
+		var length := randf_range(0.6, 2.2)
+		var mi := MeshInstance3D.new()
+		mi.mesh = Cave.stalactite(length, randf_range(0.15, 0.4))
+		mi.material_override = m
+		mi.rotation = Vector3(randf_range(-0.15, 0.15), randf(), randf_range(-0.15, 0.15))
+		_place(mi, Vector3(x, cave.ceiling_y(x, z, h) + 0.2 - length / 2, z), mi.rotation.y, 1.0)
+
+## Visual-only dressing that the simulation doesn't need to know about.
+func _dress() -> void:
+	var T := Level.T
+	# rails down the entrance tunnel and across the diggings
+	_rail_z(4.0 * T, 15.0 * T, 27.0 * T)
+	_rail_x(10 * T, 15 * T, 10.9 * T)
+	_rail_x(20 * T, 23 * T, 9.9 * T)
+	# lanterns hanging from the timber frames
+	for e in lv.decor:
+		if e.kind == "timber" and e.pos.y > 6 and e.pos.y < 7 and (e.scale.x > 6 or e.scale.z > 6) and randf() < 0.6:
+			var p: Vector3 = e.pos + Vector3(0, -1.3, 0)
+			_lantern(p)
+	# glowing ore crystals in the diggings and the sorting cave
+	for c in [[1.2, 7.3, Color(0.3, 0.8, 1.0)], [9.6, 11.6, Color(0.4, 0.9, 0.8)], [5.5, 14.6, Color(0.3, 0.7, 1.0)], [15.3, 11.5, Color(0.5, 0.6, 1.0)], [19.7, 9.2, Color(0.3, 0.9, 0.9)], [4.6, 19.0, Color(0.35, 0.75, 1.0)]]:
+		var p := Vector3(c[0] * T, 0, c[1] * T)
+		var cr := Assets.prop("q_crystal_rock", 0.03)
+		_place(cr, p, randf() * TAU, 1.6)
+		_tint_emissive(cr, c[2] * 1.6)
+		light_sources.append({ "pos": p + Vector3(0, 1.5, 0), "color": c[2], "range": 9.0, "energy": 1.4, "flicker": false })
+	# loose rubble and planks along the tunnel walls (small enough to ignore for collision)
+	for z in range(15, 27):
+		for side in [3.0 * T + 0.5, 5.0 * T - 0.5]:
+			if randf() < 0.5:
+				var m: String = ["k_Stone_Chunks_Small", "k_Rock_1_A_Color1", "k_Rock_2_A_Color1"][randi() % 3]
+				_place(Assets.prop(m), Vector3(side + randf_range(-0.2, 0.2), 0, z * T + randf() * T), randf() * TAU, randf_range(0.6, 1.0))
+
+func _rail_z(x: float, z0: float, z1: float) -> void:
+	var iron := Look.toon(Color("#6b6a70"), null, 0.0)
+	var tie := Look.toon(Color("#5a3d26"), null, 0.0)
+	for s in [-0.75, 0.75]:
+		_box(Vector3(x + s, 0.2, (z0 + z1) / 2), Vector3(0.14, 0.14, z1 - z0), iron)
+	var z := z0 + 0.6
+	while z < z1:
+		_box(Vector3(x, 0.08, z), Vector3(2.3, 0.14, 0.5), tie, randf_range(-0.05, 0.05))
+		z += 1.3
+
+func _rail_x(x0: float, x1: float, z: float) -> void:
+	_build_rails(x0, x1, z)
+
+func _lantern(p: Vector3) -> void:
+	var chain := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.03
+	cm.bottom_radius = 0.03
+	cm.height = 0.9
+	chain.mesh = cm
+	chain.material_override = Look.toon(Color("#2a2a2e"), null, 0.0)
+	_place(chain, p + Vector3(0, 0.75, 0), 0.0, 1.0)
+	var body := MeshInstance3D.new()
+	var bm := CylinderMesh.new()
+	bm.top_radius = 0.18
+	bm.bottom_radius = 0.24
+	bm.height = 0.5
+	bm.radial_segments = 6
+	body.mesh = bm
+	var lm := Look.toon(Color("#ffcf80"), null, 0.02)
+	lm.set_shader_parameter("emission", Color(1.0, 0.6, 0.25) * 0.55)
+	body.material_override = lm
+	_place(body, p, 0.0, 1.0)
+	light_sources.append({ "pos": p + Vector3(0, -0.3, 0), "color": Color(1, 0.7, 0.4), "range": 12.0, "energy": 0.7 })
+
+func _tint_emissive(n: Node, c: Color) -> void:
+	for m in n.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		for i in mi.mesh.get_surface_count():
+			var mat := mi.get_active_material(i)
+			if mat is ShaderMaterial:
+				var copy := (mat as ShaderMaterial).duplicate() as ShaderMaterial
+				copy.set_shader_parameter("tint", Color(c.r * 0.6 + 0.4, c.g * 0.6 + 0.4, c.b * 0.6 + 0.4))
+				copy.set_shader_parameter("emission", c * 0.6)
+				mi.set_surface_override_material(i, copy)
+
+## Drifting dust in the air around a node (attach to the camera rig).
+static func dust_motes() -> CPUParticles3D:
+	var ps := CPUParticles3D.new()
+	ps.amount = 160
+	ps.lifetime = 6.0
+	ps.preprocess = 6.0
+	ps.local_coords = false
+	ps.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	ps.emission_box_extents = Vector3(9, 4, 9)
+	ps.direction = Vector3(0.3, 0.1, 0.2)
+	ps.spread = 180
+	ps.gravity = Vector3(0, -0.02, 0)
+	ps.initial_velocity_min = 0.05
+	ps.initial_velocity_max = 0.2
+	ps.scale_amount_min = 0.5
+	ps.scale_amount_max = 1.0
+	var grad := Gradient.new()
+	grad.set_color(0, Color(1, 0.9, 0.75, 0))
+	grad.add_point(0.3, Color(1, 0.9, 0.75, 0.5))
+	grad.add_point(0.7, Color(1, 0.9, 0.75, 0.5))
+	grad.set_color(grad.get_point_count() - 1, Color(1, 0.9, 0.75, 0))
+	ps.color_ramp = grad
+	var q := QuadMesh.new()
+	q.size = Vector2(0.035, 0.035)
+	var m := fire_mat().duplicate() as StandardMaterial3D
+	m.albedo_color = Color(0.6, 0.55, 0.5)
+	q.material = m
+	ps.mesh = q
+	return ps

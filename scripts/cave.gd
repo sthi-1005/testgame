@@ -12,12 +12,12 @@ func _init() -> void:
 	noise.frequency = 0.16
 	noise.fractal_octaves = 3
 	noise2.seed = 99
-	noise2.frequency = 0.09
+	noise2.frequency = 0.05
 	noise2.fractal_octaves = 2
 
 func disp(p: Vector3, inward: Vector3) -> Vector3:
 	var d := Vector3(noise.get_noise_3d(p.x, p.y, p.z), noise.get_noise_3d(p.x + 71.0, p.y, p.z) * 0.35, noise.get_noise_3d(p.x, p.y - 33.0, p.z + 17.0))
-	d += Vector3(noise2.get_noise_3d(p.x, p.y, p.z), 0, noise2.get_noise_3d(p.z, p.y, p.x)) * 0.8
+	d += Vector3(noise2.get_noise_3d(p.x, p.y, p.z), 0, noise2.get_noise_3d(p.z, p.y, p.x)) * 1.6
 	d *= amp
 	# never bulge more than a little into the walkable space
 	var into := d.dot(inward)
@@ -55,6 +55,10 @@ func wall(st: SurfaceTool, a: Vector3, b: Vector3, inward: Vector3, h: float) ->
 			_tri(st, p00, p01, p10, uv, uv + dv, uv + du, inward)
 			_tri(st, p10, p01, p11, uv + du, uv + dv, uv + du + dv, inward)
 
+func ceiling_y(x: float, z: float, h: float) -> float:
+	var sag := (noise.get_noise_3d(x * 0.7, 5.0, z * 0.7) * 0.5 + 0.5) * 1.6 + noise2.get_noise_2d(x, z) * 0.5
+	return h - sag
+
 ## A rough ceiling over a rectangle at height h, sagging down in places.
 func ceiling(st: SurfaceTool, x0: float, z0: float, x1: float, z1: float, h: float) -> void:
 	var nx := maxi(2, int(ceil((x1 - x0) / 0.9)))
@@ -66,8 +70,8 @@ func ceiling(st: SurfaceTool, x0: float, z0: float, x1: float, z1: float, h: flo
 			var p := Vector3(lerpf(x0, x1, float(i) / nx), h, lerpf(z0, z1, float(j) / nz))
 			var sag := (noise.get_noise_3d(p.x * 0.7, 5.0, p.z * 0.7) * 0.5 + 0.5) * 1.6 + noise2.get_noise_2d(p.x, p.z) * 0.5
 			p.y -= sag
-			grid.append(row)
 			row.append(p)
+		grid.append(row)
 	for j in nz:
 		for i in nx:
 			var p00: Vector3 = grid[j][i]
@@ -79,9 +83,9 @@ func ceiling(st: SurfaceTool, x0: float, z0: float, x1: float, z1: float, h: flo
 			_tri(st, p10, p11, p01, Vector2(p10.x, p10.z) / 4.0, Vector2(p11.x, p11.z) / 4.0, Vector2(p01.x, p01.z) / 4.0, Vector3.DOWN)
 
 func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, ua: Vector2, ub: Vector2, uc: Vector2, facing: Vector3) -> void:
-	# keep the winding facing into the room
+	# keep the front face toward the room (Godot treats clockwise winding as front)
 	var n := (b - a).cross(c - a)
-	if n.dot(facing) < 0:
+	if n.dot(facing) > 0:
 		var t := b
 		b = c
 		c = t
@@ -105,16 +109,16 @@ static func stalactite(length: float, radius: float) -> Mesh:
 static func rock_tex() -> Texture2D:
 	var n := FastNoiseLite.new()
 	n.seed = 7
-	n.frequency = 0.03
-	n.fractal_octaves = 5
-	n.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	n.frequency = 0.02
+	n.fractal_octaves = 4
 	var img := n.get_seamless_image(256, 256)
-	var lo := Color("#2e2a2b")
-	var mid := Color("#5d5450")
-	var hi := Color("#8a7d72")
+	var dark := Color("#3b322e")
+	var light := Color("#6a5c52")
 	for y in img.get_height():
 		for x in img.get_width():
 			var v := img.get_pixel(x, y).r
-			img.set_pixel(x, y, lo.lerp(mid, v * 2.0) if v < 0.5 else mid.lerp(hi, (v - 0.5) * 2.0))
+			var strata := 0.5 + 0.5 * sin(y / 256.0 * TAU * 6.0 + v * 4.0)
+			var c := dark.lerp(light, clampf(v * 0.8 + strata * 0.25, 0.0, 1.0))
+			img.set_pixel(x, y, c)
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
