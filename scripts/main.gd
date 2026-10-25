@@ -176,6 +176,20 @@ func _start_net(addr: String) -> void:
 
 func _start() -> void:
 	if menu:
+		# building the stage freezes the screen for a while (many seconds on a phone), so say so first
+		for c in menu.get_children():
+			if not c is ColorRect:
+				c.queue_free()
+		var wait := Label.new()
+		wait.text = "Loading %s..." % Stages.info(stage).name
+		wait.set_anchors_preset(Control.PRESET_FULL_RECT)
+		wait.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		wait.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		wait.add_theme_font_size_override("font_size", 32)
+		wait.add_theme_color_override("font_color", Color("#ffcf80"))
+		menu.add_child(wait)
+		await get_tree().process_frame
+		await get_tree().process_frame
 		menu.queue_free()
 		menu = null
 	game = Game.new()

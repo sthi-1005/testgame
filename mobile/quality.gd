@@ -13,6 +13,7 @@ static var touch := false
 static var phone := false # touch with a short screen side under ~500 points: the HUD gets scaled up
 static var _done := false
 static var _force_phone := false
+static var _rotate_note: Control
 
 static func setup() -> void:
 	if _done:
@@ -34,13 +35,15 @@ static func setup() -> void:
 	if tier == "mobile":
 		Engine.max_fps = 60
 	if touch:
+		_add_rotate_note()
 		_fit_ui()
 		_window().size_changed.connect(_fit_ui)
 	print("Quality: tier=%s touch=%s" % [tier, touch])
 
 ## Thumb-sized UI: the project's base size is 1600x900 (canvas_items, expand). On a phone in landscape
 ## that makes a 64 px hotbar slot about 5 mm tall, so scale everything up until the logical screen is
-## roughly 560 px high (phones) or 760 px (tablets).
+## roughly 560 px on its short side (phones) or 760 px (tablets). Phones in portrait get a
+## "turn sideways" note over everything, since the menu and HUD are laid out for landscape.
 static func _fit_ui() -> void:
 	var w := _window()
 	var px := Vector2(w.size)
@@ -49,8 +52,30 @@ static func _fit_ui() -> void:
 	var short_pts := minf(px.x, px.y) / maxf(DisplayServer.screen_get_scale(), 1.0)
 	phone = short_pts < 500.0 or _force_phone
 	var base: float = minf(px.x / 1600.0, px.y / 900.0)
-	var want_h := 560.0 if phone else 760.0
-	w.content_scale_factor = maxf(1.0, px.y / (want_h * base))
+	var want := 560.0 if phone else 760.0
+	w.content_scale_factor = maxf(1.0, minf(px.x, px.y) / (want * base))
+	if _rotate_note:
+		_rotate_note.visible = phone and px.y > px.x
+
+static func _add_rotate_note() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 100
+	var bg := ColorRect.new()
+	bg.color = Color(0.04, 0.03, 0.05, 0.96)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	var l := Label.new()
+	l.text = "Turn your phone sideways to play."
+	l.set_anchors_preset(Control.PRESET_FULL_RECT)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD
+	l.add_theme_font_size_override("font_size", 26)
+	bg.add_child(l)
+	bg.visible = false
+	layer.add_child(bg)
+	_window().add_child.call_deferred(layer)
+	_rotate_note = bg
 
 static func _window() -> Window:
 	return (Engine.get_main_loop() as SceneTree).root
