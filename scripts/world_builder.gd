@@ -363,7 +363,13 @@ func _stalactites(r: Array, h: float, cave: Cave) -> void:
 	for i in n:
 		var x := randf_range(r[0] * T + 0.5, (r[2] + 1) * T - 0.5)
 		var z := randf_range(r[1] * T + 0.5, (r[3] + 1) * T - 0.5)
-		var length := randf_range(0.6, 2.2)
+		# keep the middle of the walkway clear so they don't hang in front of the camera
+		var ex := minf(x - r[0] * T, (r[2] + 1) * T - x)
+		var ez := minf(z - r[1] * T, (r[3] + 1) * T - z)
+		var edge := minf(ex, ez)
+		if edge > 2.2 and randf() < 0.8:
+			continue
+		var length := randf_range(0.5, 1.6) if edge > 2.2 else randf_range(0.6, 2.0)
 		var mi := MeshInstance3D.new()
 		mi.mesh = Cave.stalactite(length, randf_range(0.15, 0.4))
 		mi.material_override = m

@@ -10,6 +10,8 @@ const QUAT_ALIAS := { "idle": "Idle", "combatIdle": "Idle", "run": "Run", "walk"
 	"smash": "Jump", "cast": "Idle", "release": "Punch", "heal": "Yes", "hit": "HitReact", "death": "Death", "yell": "Wave", "spawn": "Yes" }
 const BAT_ALIAS := { "idle": "Bat_Flying", "combatIdle": "Bat_Flying", "run": "Bat_Flying", "walk": "Bat_Flying", "back": "Bat_Flying",
 	"attack": "Bat_Attack", "attack2": "Bat_Attack2", "hit": "Bat_Hit", "death": "Bat_Death" }
+## Characters are drawn larger than the sim's collision circles so they hold their own in the 4 m tunnels.
+const CHAR_SCALE := 1.3
 const LOOPING := ["idle", "combatIdle", "run", "walk", "back", "cast"]
 
 # Animation clips for the KayKit rig, retargeted onto every KayKit character.
@@ -228,5 +230,5 @@ static func character(body: String) -> Dictionary:
 	model.add_child(ap)
 	ap.root_node = ap.get_path_to(model)
 	ap.add_animation_library("", lib)
-	model.scale = Vector3.ONE * def.get("scale", 1.0)
+	model.scale = Vector3.ONE * def.get("scale", 1.0) * CHAR_SCALE
 	return { "root": model, "anim": ap, "skeleton": sk }
