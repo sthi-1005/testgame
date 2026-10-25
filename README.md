@@ -43,6 +43,50 @@ The sim is a plain `RefCounted`; whoever owns it calls these. Nothing in it touc
   - `sim.world_state()`: everything a late joiner needs.
 - `sim.players`: peer to SUnit. `sim.party` and `sim.enemies` hold all units.
 
+## Multiplayer (`net/`)
+
+`Net` (autoload, `net/net.gd`) wraps the sim for solo play, listen servers and dedicated servers. All three take
+the same path: solo play runs over an `OfflineMultiplayerPeer`, and on a host the local player is peer 1, whose
+messages are plain calls instead of RPCs. The transport is ENet on native builds and WebSocket on web
+(`Net.transport`). A browser client needs a server started with `--ws`.
+
+- **Client API:** `host_solo(cls)`, `host(cls, port)`, `join("host[:port]", cls)`, `set_class(cls)`, `start_game()`
+  (the party leader only), `leave()`. In play: `send_move(pos, yaw, dt)` (call every frame; it's sent at `D.TICK`
+  and only when something changed), `send_use(ab, target_id)`, `send_target(id, attack)`, `send_loot()`.
+- **Signals:** `state_changed(offline|connecting|lobby|play|disconnected|failed)` (`Net.last_error` holds the
+  reason), `lobby_changed([{peer, cls}])` (leader first), `world_received(sim.world_state())`, `you_are(unit_id)`,
+  `snapshot_received(PackedFloat32Array)` (always a complete `Sim.snapshot()`), `events_received(Array)` (private
+  events merged in), and `party_detail_received(Dictionary)`. In party detail, `cds` and `gcd` are filled only
+  for your own unit; everyone's buffs are included.
+- **Ordering:** `world_received` arrives before any events for that world. Units already in the world never get
+  a separate `spawn` event.
+- **Wire:** the server sends each snapshot as a delta. Only the rows that changed in the last 3 ticks are sent,
+  plus a full keyframe every 0.5 s, split into packets under the MTU. Units are removed only by the reliable
+  `despawn` event, so a lost packet can never make one vanish. Snapshots and moves are unreliable-ordered;
+  events, actions and the lobby are reliable.
+- **Joins:** a mid-run join takes over the AI unit of the same class, or adds a new member. A player who leaves
+  hands their unit to the AI. When the last player leaves a dedicated server, it resets to the lobby.
+
+Dedicated server (prints bandwidth every 10 s):
+
+```
+godot --headless --path . res://net/server.tscn -- --port 24565 [--ws]
+<exported build> --headless -- --server --port 24565      # same thing from an export
+```
+
+Open UDP 24565 (or TCP for `--ws`) on the host. A ~$5 VPS is plenty for one party.
+
+Network tests:
+
+```
+godot --headless --path . res://tools/net_bot.tscn -- --solo --cls mage          # one bot client, solo
+tools/net_party.sh 60                     # dedicated server plus 5 bot clients on localhost
+LAG="60 15 0.03" tools/net_party.sh 60    # through tools/lagproxy.py: ~120 ms ping, ±15 ms jitter, 3% loss
+```
+
+Measured with 5 players on Godot 4.7.2: 30 snapshots/s at every client, zero snap-backs at 120 ms ping with 3% loss,
+about 22 KB/s down and under 1 KB/s up per player.
+
 ## Tools
 
 ```
