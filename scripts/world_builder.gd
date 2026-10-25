@@ -24,11 +24,13 @@ static func dirt_tex() -> Texture2D:
 		n.frequency = 0.05
 		n.fractal_octaves = 4
 		var img := n.get_seamless_image(256, 256)
-		var lo := Color("#3b2c22")
-		var hi := Color("#7a634d")
+		var src := img
+		img = Image.create(src.get_width(), src.get_height(), false, Image.FORMAT_RGB8) # the noise image is greyscale (L8) and would drop colour
+		var lo := Color("#6d5240")
+		var hi := Color("#94704f")
 		for y in img.get_height():
 			for x in img.get_width():
-				img.set_pixel(x, y, lo.lerp(hi, img.get_pixel(x, y).r))
+				img.set_pixel(x, y, lo.lerp(hi, src.get_pixel(x, y).r))
 		img.generate_mipmaps()
 		_tex.dirt = ImageTexture.create_from_image(img)
 	return _tex.dirt
@@ -87,7 +89,7 @@ func build() -> void:
 	# ceilings: flat over the built hall, rough sagging rock over the mine
 	var ceil_mat := Look.toon(Color(0.42, 0.36, 0.31), dirt_tex(), 0.0)
 	var cave := Cave.new()
-	var rock := Look.toon(Color(1, 1, 1), rock_tex(), 0.04)
+	var rock := Look.toon(Color(1, 1, 1), rock_tex(), 0.0)
 	var cave_st := {} # zone -> SurfaceTool, one mesh per zone keeps draw calls low and lights local
 	for r in lv.rects:
 		var w: float = (r[2] - r[0] + 1) * T + 2
@@ -165,7 +167,8 @@ func build() -> void:
 		cart_nodes.append(_build_cart(p))
 	for zn in cave_st:
 		var st: SurfaceTool = cave_st[zn]
-		st.generate_normals() # not indexed, so every facet stays flat: chunky toon rock
+		st.index()
+		st.generate_normals() # smooth normals: soft, rounded rock
 		var mi := MeshInstance3D.new()
 		mi.mesh = st.commit()
 		mi.material_override = rock

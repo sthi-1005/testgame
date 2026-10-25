@@ -12,7 +12,7 @@ uniform vec4 albedo : source_color = vec4(1.0);
 uniform vec4 tint : source_color = vec4(1.0);
 uniform vec3 emission : source_color = vec3(0.0);
 uniform vec2 uv_scale = vec2(1.0);
-uniform float rim = 0.12;
+uniform float rim = 0.25;
 void fragment() {
 	vec4 c = albedo * tint;
 	if (use_tex) c *= texture(albedo_tex, UV * uv_scale);
@@ -20,13 +20,13 @@ void fragment() {
 	EMISSION = emission;
 	// a thin cool rim keeps silhouettes readable in the dark
 	float f = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	EMISSION += vec3(0.35, 0.45, 0.55) * f * rim;
+	EMISSION += vec3(1.0, 0.85, 0.7) * c.rgb * f * rim;
 }
 void light() {
+	// soft, rounded shading: a wide wrap with one gentle step, so forms read as smooth and toy-like
 	float ndl = dot(NORMAL, LIGHT) * 0.5 + 0.5;
 	float e = ndl * ATTENUATION;
-	// three hard bands with a sliver of softening so they don't alias
-	float b = smoothstep(0.04, 0.12, e) * 0.3 + smoothstep(0.3, 0.38, e) * 0.35 + smoothstep(0.62, 0.7, e) * 0.35;
+	float b = mix(smoothstep(0.25, 0.75, e), e, 0.45);
 	DIFFUSE_LIGHT += LIGHT_COLOR * b / PI;
 }
 """
@@ -35,7 +35,7 @@ const INK := """
 shader_type spatial;
 render_mode unshaded, cull_front, specular_disabled;
 uniform float thickness = 0.025;
-uniform vec4 color : source_color = vec4(0.05, 0.035, 0.04, 1.0);
+uniform vec4 color : source_color = vec4(0.16, 0.09, 0.07, 1.0);
 void vertex() {
 	VERTEX += NORMAL * thickness;
 }
@@ -171,9 +171,9 @@ static func apply(root: Node, ink_w := 0.025, tint := Color.WHITE) -> void:
 
 # ------------------------------------------------------------------ colour grade per zone
 const GRADE := {
-	"dark": { "fog": 0.016, "fog_c": Color(0.03, 0.06, 0.07), "amb": 0.6, "amb_c": Color(0.62, 0.55, 0.5), "exp": 1.3, "con": 1.2, "sat": 0.85,
+	"dark": { "fog": 0.016, "fog_c": Color(0.1, 0.06, 0.08), "amb": 0.5, "amb_c": Color(0.72, 0.64, 0.75), "exp": 1.0, "con": 1.1, "sat": 1.25,
 		"torch": Color(1, 0.55, 0.22) },
-	"arena": { "fog": 0.008, "fog_c": Color(0.1, 0.08, 0.09), "amb": 0.8, "amb_c": Color(0.85, 0.82, 0.95), "exp": 1.3, "con": 1.08, "sat": 1.15,
+	"arena": { "fog": 0.008, "fog_c": Color(0.14, 0.09, 0.12), "amb": 0.7, "amb_c": Color(0.85, 0.78, 0.9), "exp": 1.15, "con": 1.08, "sat": 1.3,
 		"torch": Color(1, 0.62, 0.3) },
 }
 
@@ -182,23 +182,23 @@ static func make_environment() -> Environment:
 	e.background_mode = Environment.BG_COLOR
 	e.background_color = Color(0.02, 0.04, 0.05)
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.tonemap_mode = Environment.TONE_MAPPER_ACES
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.fog_enabled = true
 	e.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 	e.glow_enabled = true
-	e.glow_intensity = 0.5
+	e.glow_intensity = 0.7
 	e.glow_bloom = 0.05
 	e.glow_hdr_threshold = 1.0
 	e.adjustment_enabled = true
 	# Forward+ only (ignored by the web/Compatibility build): volumetric fog, ambient occlusion, GI
 	e.volumetric_fog_enabled = true
-	e.volumetric_fog_density = 0.022
-	e.volumetric_fog_albedo = Color(0.7, 0.62, 0.55)
+	e.volumetric_fog_density = 0.008
+	e.volumetric_fog_albedo = Color(1.0, 0.8, 0.6)
 	e.volumetric_fog_length = 48.0
 	e.volumetric_fog_ambient_inject = 0.15
 	e.ssao_enabled = true
 	e.ssao_radius = 1.6
-	e.ssao_intensity = 2.5
+	e.ssao_intensity = 1.5
 	e.sdfgi_enabled = false
 	return e
 

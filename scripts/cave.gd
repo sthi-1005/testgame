@@ -5,11 +5,11 @@ extends RefCounted
 
 var noise := FastNoiseLite.new()
 var noise2 := FastNoiseLite.new()
-var amp := 0.9
+var amp := 0.75
 
 func _init() -> void:
 	noise.seed = 4242
-	noise.frequency = 0.16
+	noise.frequency = 0.11
 	noise.fractal_octaves = 3
 	noise2.seed = 99
 	noise2.frequency = 0.05
@@ -112,13 +112,15 @@ static func rock_tex() -> Texture2D:
 	n.frequency = 0.02
 	n.fractal_octaves = 4
 	var img := n.get_seamless_image(256, 256)
-	var dark := Color("#3b322e")
-	var light := Color("#6a5c52")
+	var src := img
+	img = Image.create(src.get_width(), src.get_height(), false, Image.FORMAT_RGB8) # the noise image is greyscale (L8) and would drop colour
+	var dark := Color("#9a6544")
+	var light := Color("#d6a576")
 	for y in img.get_height():
 		for x in img.get_width():
-			var v := img.get_pixel(x, y).r
+			var v := src.get_pixel(x, y).r
 			var strata := 0.5 + 0.5 * sin(y / 256.0 * TAU * 6.0 + v * 4.0)
-			var c := dark.lerp(light, clampf(v * 0.8 + strata * 0.25, 0.0, 1.0))
+			var c := dark.lerp(light, clampf(0.2 + v * 0.45 + strata * 0.2, 0.0, 1.0))
 			img.set_pixel(x, y, c)
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
