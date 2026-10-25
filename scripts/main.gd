@@ -69,10 +69,10 @@ func _build_menu() -> void:
 		var sb := Button.new()
 		sb.toggle_mode = true
 		sb.button_group = sgroup
-		sb.custom_minimum_size = Vector2(270, 84)
+		sb.custom_minimum_size = Vector2(205, 96) # four fit across the menu
 		sb.text = "%s\n%s" % [st.name, st.blurb]
 		sb.autowrap_mode = TextServer.AUTOWRAP_WORD
-		sb.add_theme_font_size_override("font_size", 14)
+		sb.add_theme_font_size_override("font_size", 13)
 		sb.button_pressed = st.id == stage
 		var sid: String = st.id
 		sb.pressed.connect(func(): stage = sid)
