@@ -30,6 +30,7 @@ var boss_phase := ""
 var state := "play"
 var in_combat := false
 var follow_server := false # autoplay: the server moves your unit
+var touch_move := Vector2.ZERO # touch thumbstick (mobile/touch_controls.gd): x strafe, y forward, relative to the camera
 
 # server clock: the latest snapshot time, and a smoothed render clock behind it
 var server_t := 0.0
@@ -71,6 +72,9 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.game = self
 	add_child(hud)
+	Quality.apply(self)
+	if Quality.touch:
+		add_child(TouchControls.new(self))
 
 func attach(n: Node) -> void:
 	net = n
@@ -269,12 +273,20 @@ func _physics_process(delta: float) -> void:
 		my_yaw += turn * 2.6 * delta
 		if not lmb:
 			cam_yaw = lerp_angle(cam_yaw, my_yaw, 1.0)
+	var stick := can_move and touch_move.length() > 0.15
 	var was_moving := moving
-	moving = fwd != 0 or side != 0
+	moving = fwd != 0 or side != 0 or stick
 	if moving:
 		var f := Vector3(sin(my_yaw), 0, cos(my_yaw))
 		var r := Vector3(-f.z, 0, f.x)
 		var dir := (f * fwd + r * side).normalized()
+		if stick:
+			# run the way the stick points, seen from the camera, and face that way
+			var cf := Vector3(sin(cam_yaw), 0, cos(cam_yaw))
+			var cr := Vector3(-cf.z, 0, cf.x)
+			dir = (cf * touch_move.y + cr * touch_move.x).normalized() * minf(touch_move.length() * 1.25, 1.0)
+			my_yaw = atan2(dir.x, dir.z)
+			fwd = 1.0
 		var spd: float = D.CLASSES[me.info.body].speed * (0.6 if fwd < 0 else 1.0) * (0.6 if flags & 16 else 1.0)
 		my_pos = lv.move_circle(my_pos, dir.x * spd * delta, dir.z * spd * delta, me.info.r)
 		me.play_base("back" if fwd < 0 else "run", -0.9 if fwd < 0 else 1.05)
@@ -282,6 +294,11 @@ func _physics_process(delta: float) -> void:
 		me.play_base("combatIdle" if in_combat and D.CLASSES[me.info.body].melee else "idle", 1.0)
 	if not me.dead and flags & 32 == 0:
 		net.send_move(my_pos, my_yaw, delta)
+
+## Touch camera drag (same feel as a mouse drag).
+func touch_look(rel: Vector2) -> void:
+	cam_yaw -= rel.x * 0.006
+	cam_pitch = clampf(cam_pitch - rel.y * 0.005, -1.2, 0.35)
 
 func _key(k: Key) -> bool:
 	return Input.is_physical_key_pressed(k)
@@ -475,7 +492,7 @@ func party_views() -> Array:
 
 # ------------------------------------------------------------------ camera
 func _update_camera(delta: float) -> void:
-	if not lmb and not rmb and (moving or follow_server):
+	if not lmb and not rmb and touch_move == Vector2.ZERO and (moving or follow_server):
 		cam_yaw = lerp_angle(cam_yaw, my_yaw, clampf(delta * (1.5 if follow_server else 3.0), 0, 1))
 	var pivot := my_pos + Vector3(0, 2.2 * Assets.CHAR_SCALE, 0)
 	var ceil := lv.ceil_at(my_pos.x, my_pos.z) - 2.4
