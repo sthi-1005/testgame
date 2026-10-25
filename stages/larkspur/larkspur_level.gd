@@ -374,3 +374,10 @@ func boss_script(boss: String, sim) -> Object:
 	if boss == "mossjaw":
 		return MossjawFight.new(sim)
 	return null
+
+func victory_title() -> String:
+	return "Old Mossjaw is defeated"
+
+func loot_lines() -> Array:
+	return ["You haul open Mossjaw's toll chest: a Mossjaw Tusk Charm, a Thornwatch Signet Ring and 18 silver.",
+		"Loot: Mossjaw Tusk Charm, Thornwatch Signet Ring, 18 silver"]
