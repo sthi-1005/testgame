@@ -82,7 +82,8 @@ godot --headless --path . res://net/server.tscn -- --port 24565 [--ws]
 <exported build> --headless -- --server --port 24565      # same thing from an export
 ```
 
-Open UDP 24565 (or TCP for `--ws`) on the host. A ~$5 VPS is plenty for one party.
+Open UDP 24565 (or TCP for `--ws`) on the host. A ~$5 VPS is plenty for one party. The web build is served over HTTPS, so browsers can only join `wss://`: run the server with `--ws`
+behind TLS (Caddy or a Cloudflare proxy), and join with `wss://your.host`.
 
 Network tests:
 
