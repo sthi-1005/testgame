@@ -5,14 +5,14 @@ extends RefCounted
 
 const KAY_ALIAS := { "idle": "Idle_A", "combatIdle": "2H_Melee_Idle", "run": "Running_A", "walk": "Walking_A", "back": "Walking_B",
 	"attack": "1H_Melee_Attack_Chop", "attack2": "Chop", "smash": "Hammer", "cast": "Holding_A", "release": "Throw", "heal": "Use_Item",
-	"hit": "Hit_A", "death": "Death_A", "yell": "Idle_B", "spawn": "Spawn_Ground" }
+	"hit": "Hit_A", "death": "Death_A", "yell": "Idle_B", "spawn": "Spawn_Ground", "roll": "Dodge_Forward", "block": "Holding_A" }
 const QUAT_ALIAS := { "idle": "Idle", "combatIdle": "Idle", "run": "Run", "walk": "Walk", "back": "Walk", "attack": "Weapon", "attack2": "Punch",
 	"smash": "Jump", "cast": "Idle", "release": "Punch", "heal": "Yes", "hit": "HitReact", "death": "Death", "yell": "Wave", "spawn": "Yes" }
 const BAT_ALIAS := { "idle": "Bat_Flying", "combatIdle": "Bat_Flying", "run": "Bat_Flying", "walk": "Bat_Flying", "back": "Bat_Flying",
 	"attack": "Bat_Attack", "attack2": "Bat_Attack2", "hit": "Bat_Hit", "death": "Bat_Death" }
 ## Characters are drawn larger than the sim's collision circles so they hold their own in the 4 m tunnels.
 const CHAR_SCALE := 1.0
-const LOOPING := ["idle", "combatIdle", "run", "walk", "back", "cast"]
+const LOOPING := ["idle", "combatIdle", "run", "walk", "back", "cast", "block"]
 
 # Animation clips for the KayKit rig, retargeted onto every KayKit character.
 const KAY_CLIPS := ["res://assets/anims/anim_general.glb", "res://assets/anims/anim_move.glb", "res://assets/anims/anim_tools.glb",
@@ -144,6 +144,12 @@ static func library_for(body: String, model: Node) -> AnimationLibrary:
 				lib.add_animation(wanted[clip], a)
 	# alias any logical animation the model lacks to one it has
 	for k in alias:
+		if not lib.has_animation(k):
+			# two logical names on one clip (cast and block both hold the hands out): the first one loaded
+			for k2 in alias:
+				if k2 != k and alias[k2] == alias[k] and lib.has_animation(k2):
+					lib.add_animation(k, lib.get_animation(k2).duplicate(true))
+					break
 		if not lib.has_animation(k):
 			for fallback in ["idle", "attack"]:
 				if lib.has_animation(fallback):

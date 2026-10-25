@@ -7,15 +7,36 @@ const TICK := 30 # sim and snapshot rate (Hz)
 
 const CLASS_ORDER := ["sellsword", "cleric", "mage"]
 
+# Souls-style actions for player-controlled units (see Sim.player_act). Stamina gates every one of them:
+# an action needs stamina above zero, then spends its cost (it can drain you to zero mid-combo).
+const STAMINA := 100.0
+const STAM_REGEN := 34.0 # per second, once STAM_DELAY has passed since the last spend
+const STAM_DELAY := 0.75
+const STAM_BLOCK_REGEN := 0.35 # regen multiplier while holding block
+const SPRINT_DRAIN := 14.0 # per second while sprinting and moving
+const SPRINT_K := 1.45 # sprint speed multiplier
+const BLOCK_SPEED_K := 0.55
+const ACTS := {
+	# cost, lock = seconds before the next action or free movement, hit = when the blow lands, dmg = x weapon roll
+	"light": { "cost": 18.0, "lock": 0.62, "hit": 0.26, "dmg": 0.7, "arc": 1.1, "reach": 1.4 },
+	"heavy": { "cost": 30.0, "lock": 1.05, "hit": 0.55, "dmg": 1.6, "arc": 1.35, "reach": 1.9, "stagger": 0.7 },
+	"roll": { "cost": 18.0, "lock": 0.55, "dist": 5.0, "iframe": 0.42 },
+	"backstep": { "cost": 12.0, "lock": 0.36, "dist": 2.6, "iframe": 0.22 },
+	"parry": { "cost": 14.0, "lock": 0.6, "window": 0.28 },
+}
+# casters throw a bolt instead of swinging: light is quick, heavy is a charged blast
+const BOLT := { "light": { "dmg": [14, 19], "speed": 30.0, "size": 0.35 }, "heavy": { "dmg": [34, 44], "speed": 24.0, "size": 0.6 } }
+const AIM_RANGE := 30.0
+
 const CLASSES := {
 	"sellsword": { "name": "Bram Ironside", "short": "Bram", "title": "Sellsword", "role": "Tank", "res": "rage", "hp": 330, "armor": 260, "speed": 7.4,
-		"melee": true, "swing": 2.0, "dmg": [14, 20], "color": Color("#c8483a"),
+		"melee": true, "swing": 2.0, "dmg": [14, 20], "guard": 0.85, "color": Color("#c8483a"),
 		"blurb": "Holds the boss and takes the hits. Builds rage by fighting." },
 	"cleric": { "name": "Brother Tamsin", "short": "Tamsin", "title": "Cleric", "role": "Healer", "res": "mana", "hp": 230, "armor": 140, "speed": 7.2,
-		"melee": true, "swing": 2.2, "dmg": [8, 12], "mana": 340, "color": Color("#e8d48a"),
+		"melee": true, "swing": 2.2, "dmg": [10, 14], "guard": 0.75, "mana": 340, "color": Color("#e8d48a"),
 		"blurb": "Keeps everyone standing. Heals your friendly target, or whoever is hurt worst." },
 	"mage": { "name": "Ilsa Brightwick", "short": "Ilsa", "title": "Mage", "role": "Damage", "res": "mana", "hp": 200, "armor": 60, "speed": 7.2,
-		"melee": false, "swing": 2.0, "dmg": [6, 9], "mana": 380, "color": Color("#8ab4ff"),
+		"melee": false, "swing": 2.0, "dmg": [6, 9], "guard": 0.5, "mana": 380, "color": Color("#8ab4ff"),
 		"blurb": "Frost and fire from range. Stand still to cast. Blink out of trouble." },
 }
 
@@ -82,4 +103,4 @@ static func ability_ids() -> Array:
 		_ab_ids.append("potion")
 	return _ab_ids
 
-const ANIMS := ["idle", "combatIdle", "run", "walk", "back", "attack", "attack2", "smash", "cast", "release", "heal", "hit", "death", "yell", "spawn"]
+const ANIMS := ["idle", "combatIdle", "run", "walk", "back", "attack", "attack2", "smash", "cast", "release", "heal", "hit", "death", "yell", "spawn", "roll", "block"]

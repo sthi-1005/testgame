@@ -24,6 +24,10 @@ var rows := {} # id -> row
 var st := { "snaps": 0, "events": 0, "snaps_bytes": 0, "snaps_rows": 0, "snaps_max": 0, "tp": 0, "kills": 0, "states": [] }
 var first_snap := -1.0
 var target := 0
+var act_t := 0.0
+var roll_t := 0.0
+var roll_dir := Vector3.ZERO
+var rolls := 0
 
 func _arg(name: String, def: String) -> String:
 	var a := OS.get_cmdline_user_args()
@@ -115,6 +119,24 @@ func _process(delta: float) -> void:
 	var tpos := Vector3(tr[1], 0, tr[3])
 	var rng := D.MELEE * 0.8 if D.CLASSES[cls].melee else 20.0
 	var casting: bool = rows[me][15] >= 0
+	# Souls-style actions: swing between abilities, and every few seconds roll sideways (moving the way a
+	# client does, so the server's speed check sees real roll movement)
+	if roll_t > 0:
+		roll_t -= delta
+		var rs: float = D.ACTS.roll.dist / 0.42
+		pos = lv.move_circle(pos, roll_dir.x * rs * delta, roll_dir.z * rs * delta, 0.75 * 0.9)
+		Net.send_move(pos, yaw, delta)
+		return
+	act_t -= delta
+	if act_t <= 0 and bd <= rng + 1.0 and not casting and rows[me][22] > 30:
+		act_t = 0.75
+		if randf() < 0.2:
+			roll_dir = Vector3(cos(yaw), 0, -sin(yaw)) * (1 if randf() < 0.5 else -1)
+			roll_t = 0.42
+			rolls += 1
+			Net.send_act("roll", atan2(roll_dir.x, roll_dir.z), 0)
+			return
+		Net.send_act("light", yaw, best)
 	if bd > rng and not casting:
 		path_t -= delta
 		if path.is_empty() or path_t <= 0:
@@ -143,5 +165,5 @@ func _process(delta: float) -> void:
 
 func _report() -> void:
 	var r: PackedFloat32Array = rows.get(me, PackedFloat32Array())
-	print("BOT %s peer=%d unit=%d snaps=%d (%.1f/s) events=%d snapbacks=%d targets_killed=%d hp=%s states=%s" % [cls, multiplayer.get_unique_id(), me,
-		st.snaps, st.snaps / maxf(0.01, t - first_snap), st.events, st.tp, st.kills, (str(r[5]) if r.size() else "?"), st.states])
+	print("BOT %s peer=%d unit=%d snaps=%d (%.1f/s) events=%d snapbacks=%d targets_killed=%d rolls=%d hp=%s states=%s" % [cls, multiplayer.get_unique_id(), me,
+		st.snaps, st.snaps / maxf(0.01, t - first_snap), st.events, st.tp, st.kills, rolls, (str(r[5]) if r.size() else "?"), st.states])

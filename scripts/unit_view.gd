@@ -10,6 +10,7 @@ var anim: AnimationPlayer
 var plate: Label3D
 var shadow: MeshInstance3D
 var ward: MeshInstance3D
+var guard: MeshInstance3D # a faint shield of light in front while blocking
 var ring: MeshInstance3D
 var staff_gem: Node3D
 var hover_ring: MeshInstance3D
@@ -26,6 +27,8 @@ var cast_ab := -1
 var cast_time := 0.0
 var cast_dur := 0.0
 var potions := 3
+var stam := D.STAMINA
+var local_act_ms := -100000 # your own character plays its actions at once; skip the server's echo
 var tp_seq := 0
 var dead := false
 var base := "idle"
@@ -142,6 +145,7 @@ func apply(s: PackedFloat32Array, i: int, t: float, is_me: bool) -> void:
 	target_id = int(s[i + 18])
 	flags = int(s[i + 19])
 	potions = int(s[i + 21])
+	stam = s[i + 22]
 	var was_dead := dead
 	dead = flags & 1 != 0
 	var p := Vector3(s[i + 1], s[i + 2], s[i + 3])
@@ -166,10 +170,11 @@ func apply(s: PackedFloat32Array, i: int, t: float, is_me: bool) -> void:
 			elif D.ANIMS[a] == "spawn" or (was_dead and not dead):
 				acting = true
 				anim.play("spawn" if anim.has_animation("spawn") else "idle", 0.1, 1.0)
-			else:
+			elif not (is_me and Time.get_ticks_msec() - local_act_ms < 700):
 				play_act(D.ANIMS[a], s[i + 14])
 	if was_dead and not dead and not acting:
 		play_base("idle", 1.0)
+	_show_guard(flags & 4096 != 0 and not dead)
 	# ward bubble
 	var warded := flags & 1024 != 0 and absorb > 0
 	if warded and ward == null:
@@ -190,6 +195,35 @@ func apply(s: PackedFloat32Array, i: int, t: float, is_me: bool) -> void:
 	elif not warded and ward:
 		ward.queue_free()
 		ward = null
+
+func _show_guard(on: bool) -> void:
+	if on and guard == null:
+		guard = MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.85 * Assets.CHAR_SCALE
+		cm.bottom_radius = 0.85 * Assets.CHAR_SCALE
+		cm.height = 0.04
+		cm.radial_segments = 24
+		guard.mesh = cm
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		m.albedo_color = Color(1, 0.85, 0.5, 0.16)
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		guard.material_override = m
+		guard.rotation.x = PI / 2
+		guard.position = Vector3(0, 1.25 * Assets.CHAR_SCALE, 0.75 * Assets.CHAR_SCALE)
+		model.add_child(guard)
+	elif not on and guard:
+		guard.queue_free()
+		guard = null
+
+## Keep something playing: a clip that ends with nothing queued leaves the model in its bind pose.
+func keep_playing() -> void:
+	if not dead and not anim.is_playing() and anim.has_animation(base):
+		acting = false
+		anim.play(base, 0.2, absf(base_speed), base_speed < 0)
 
 ## Place the unit at render time rt by interpolating the snapshot buffer.
 func interpolate(rt: float) -> void:

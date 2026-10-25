@@ -5,7 +5,7 @@ extends Node3D
 
 const INTERP_DELAY := 0.1
 const CAM_MIN := 2.5
-const CAM_MAX := 22.0
+const CAM_MAX := 14.0
 
 var net: Node
 var stage_id := Stages.DEFAULT # set before the node enters the tree; a world from the server can switch it
@@ -40,13 +40,10 @@ var render_t := -1.0
 
 # camera
 var cam_yaw := PI
-var cam_pitch := -0.28
-var cam_dist := 9.0 # zoom target (the wheel and pinch set this)
-var cam_cur_dist := 9.0
+var cam_pitch := -0.2
+var cam_dist := 5.2 # zoom target (the wheel and pinch set this)
+var cam_cur_dist := 5.2
 var shake_amt := 0.0
-var lmb := false
-var rmb := false
-var drag := 0.0
 var grade_k := 0.0
 var zone := ""
 var clock := 0.0
@@ -124,6 +121,7 @@ func _on_you_are(id: int) -> void:
 		my_pos = me.position
 		me.plate.visible = false
 		cam_yaw = my_yaw
+		_capture(true)
 
 func _spawn(info: Dictionary) -> void:
 	if views.has(info.id):
@@ -253,11 +251,18 @@ func _process(delta: float) -> void:
 			continue
 		v.interpolate(render_t)
 		v.position.y += lv.floor_y(v.position.x, v.position.z)
+		v.keep_playing()
 		var near := v.position.distance_to(my_pos) < 32.0
 		v.plate.visible = not v.dead and (id == hover_id or id == target_id or (near and (v.is_enemy() and (v.flags & 2 != 0 or v.position.distance_to(my_pos) < 22.0))))
 	if me:
 		me.position = ground(my_pos)
 		me.model.rotation.y = my_yaw
+		me.keep_playing()
+	if OS.has_feature("web") and not Quality.touch:
+		# the browser drops pointer lock on Esc or a tab switch, and only grants it on a click
+		captured = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	if captured and state == "victory":
+		_capture(false) # the end screen needs the cursor
 	_update_camera(delta)
 	_update_hover()
 	_update_teles_projs(delta)
@@ -280,102 +285,422 @@ func _process(delta: float) -> void:
 func _physics_process(delta: float) -> void:
 	if me == null or net == null or follow_server:
 		return
+	_pad_poll(delta)
+	act_lock = maxf(0.0, act_lock - delta)
+	if locked:
+		_check_lock()
 	var flags := me.flags
 	var can_move := not me.dead and flags & (4 | 8 | 32) == 0 and state == "play" and not hud.typing()
-	var fwd := 0.0
-	var side := 0.0
-	var turn := 0.0
+	var input := Vector2.ZERO # x right, y forward, relative to the camera
 	if can_move:
-		if _key(KEY_W) or (lmb and rmb): fwd += 1
-		if _key(KEY_S): fwd -= 1
-		if _key(KEY_Q): side -= 1
-		if _key(KEY_E): side += 1
-		if rmb:
-			if _key(KEY_A): side -= 1
-			if _key(KEY_D): side += 1
-		else:
-			if _key(KEY_A): turn += 1
-			if _key(KEY_D): turn -= 1
-	if turn != 0:
-		my_yaw += turn * 2.6 * delta
-		if not lmb:
-			cam_yaw = lerp_angle(cam_yaw, my_yaw, 1.0)
-	var stick := can_move and touch_move.length() > 0.15
+		if _key(KEY_W): input.y += 1
+		if _key(KEY_S): input.y -= 1
+		if _key(KEY_D): input.x += 1
+		if _key(KEY_A): input.x -= 1
+		input = input.normalized()
+		if touch_move.length() > 0.15:
+			input = touch_move.normalized() * minf(touch_move.length() * 1.25, 1.0)
+		elif pad_move.length() > 0.2:
+			input = pad_move.limit_length(1.0)
+	var cf := Vector3(sin(cam_yaw), 0, cos(cam_yaw))
+	var cr := Vector3(-cf.z, 0, cf.x)
+	move_dir = cf * input.y + cr * input.x
+	# a held dodge button turns into a sprint once you are moving
+	if dodge_down and not sprinting and clock - dodge_t > SPRINT_HOLD and move_dir.length() > 0.3 and me.stam > 5:
+		sprinting = true
+		net.send_act("sprint", my_yaw, 0)
+	if sprinting and (me.stam <= 0 or move_dir.length() < 0.1):
+		sprinting = false
+		net.send_act("unsprint", my_yaw, 0)
+	if act_lock <= 0 and buffered != "" and clock - buffered_t < BUFFER_T:
+		var k := buffered
+		buffered = ""
+		_act(k)
+	var lt: UnitView = views.get(target_id) if locked else null
 	var was_moving := moving
-	moving = fwd != 0 or side != 0 or stick
-	_fwd_input = fwd
-	if moving:
-		var f := Vector3(sin(my_yaw), 0, cos(my_yaw))
-		var r := Vector3(-f.z, 0, f.x)
-		var dir := (f * fwd + r * side).normalized()
-		if stick:
-			# run the way the stick points, seen from the camera, and face that way
-			var cf := Vector3(sin(cam_yaw), 0, cos(cam_yaw))
-			var cr := Vector3(-cf.z, 0, cf.x)
-			dir = (cf * touch_move.y + cr * touch_move.x).normalized() * minf(touch_move.length() * 1.25, 1.0)
-			my_yaw = atan2(dir.x, dir.z)
-			fwd = 1.0
-		var spd: float = D.CLASSES[me.info.body].speed * (0.6 if fwd < 0 else 1.0) * (0.6 if flags & 16 else 1.0)
-		my_pos = lv.move_circle(my_pos, dir.x * spd * delta, dir.z * spd * delta, me.info.r)
-		me.play_base("back" if fwd < 0 else "run", -0.9 if fwd < 0 else 1.05)
-	elif was_moving or me.base in ["run", "back"]:
-		me.play_base("combatIdle" if in_combat and D.CLASSES[me.info.body].melee else "idle", 1.0)
+	moving = false
+	if roll_t > 0:
+		# the roll (or backstep) carries you; the server opened its i-frames when it got the press
+		roll_t -= delta
+		var spd := roll_dist / ROLL_MOVE_T
+		if roll_t > roll_total - ROLL_MOVE_T and can_move:
+			my_pos = lv.move_circle(my_pos, roll_dir.x * spd * delta, roll_dir.z * spd * delta, me.info.r)
+	elif can_move and act_lock <= 0:
+		if lt and not sprinting:
+			my_yaw = lerp_angle(my_yaw, atan2(lt.position.x - my_pos.x, lt.position.z - my_pos.z), clampf(delta * 14.0, 0, 1))
+		if move_dir.length() > 0.05:
+			moving = true
+			if lt == null or sprinting:
+				my_yaw = lerp_angle(my_yaw, atan2(move_dir.x, move_dir.z), clampf(delta * 12.0, 0, 1))
+			var spd: float = D.CLASSES[me.info.body].speed * (0.6 if flags & 16 else 1.0)
+			if sprinting:
+				spd *= D.SPRINT_K
+			elif blocking:
+				spd *= D.BLOCK_SPEED_K
+			var f := Vector3(sin(my_yaw), 0, cos(my_yaw))
+			var back := lt != null and not sprinting and move_dir.normalized().dot(f) < -0.4
+			if back:
+				spd *= 0.75
+			my_pos = lv.move_circle(my_pos, move_dir.x * spd * delta, move_dir.z * spd * delta, me.info.r)
+			if blocking:
+				me.play_base("walk", 0.8)
+			elif back:
+				me.play_base("back", -0.9)
+			elif lt and absf(move_dir.normalized().dot(f)) < 0.5:
+				me.play_base("walk", 1.2) # strafing round a locked target
+			else:
+				me.play_base("run", 1.45 if sprinting else 1.05 * move_dir.length())
+	if not moving and roll_t <= 0:
+		if blocking:
+			me.play_base("block", 1.0)
+		elif was_moving or me.base in ["run", "back", "walk", "block"]:
+			me.play_base("combatIdle" if in_combat and D.CLASSES[me.info.body].melee else "idle", 1.0)
 	if not me.dead and flags & 32 == 0:
 		net.send_move(my_pos, my_yaw, delta)
 
 ## Touch camera drag (same feel as a mouse drag).
 func touch_look(rel: Vector2) -> void:
-	cam_yaw -= rel.x * 0.006
-	cam_pitch = clampf(cam_pitch - rel.y * 0.005, -1.25, 0.45)
+	_look(rel * 1.2)
+
+func _look(rel: Vector2) -> void:
+	if locked:
+		# with a target held, a sideways flick moves the lock to the next enemy that way
+		flick += rel.x
+		if absf(flick) > FLICK:
+			_switch_lock(signi(int(flick)))
+			flick = 0.0
+		return
+	cam_yaw -= rel.x * 0.0045 * look_sens
+	cam_pitch = clampf(cam_pitch - rel.y * 0.004 * look_sens, -1.2, 0.5)
 
 func _key(k: Key) -> bool:
 	return Input.is_physical_key_pressed(k)
 
+# ------------------------------------------------------------------ souls-style actions
+const SPRINT_HOLD := 0.28 # hold dodge this long and it becomes a sprint
+const BUFFER_T := 0.35 # a press during an attack or roll fires when it ends, if it is this recent
+const ROLL_MOVE_T := 0.42
+const FLICK := 70.0
+var act_lock := 0.0
+var buffered := ""
+var buffered_t := 0.0
+var roll_t := 0.0
+var roll_total := 0.0
+var roll_dist := 0.0
+var roll_dir := Vector3.ZERO
+var move_dir := Vector3.ZERO
+var dodge_down := false
+var dodge_t := 0.0
+var sprinting := false
+var blocking := false
+var locked := false
+var flick := 0.0
+var look_sens := 1.0
+var captured := false
+var pad_move := Vector2.ZERO
+var _pad_rt := false
+var _pad_lt := false
+var _pad_flick := 0.0
+var lock_dot: MeshInstance3D
+
+func dodge_press() -> void:
+	if dodge_down:
+		return
+	dodge_down = true
+	dodge_t = clock
+
+func dodge_release() -> void:
+	if not dodge_down:
+		return
+	dodge_down = false
+	if sprinting:
+		sprinting = false
+		net.send_act("unsprint", my_yaw, 0)
+	elif clock - dodge_t <= SPRINT_HOLD:
+		_act("roll")
+
+func block_press() -> void:
+	if blocking or me == null or me.dead:
+		return
+	blocking = true
+	net.send_act("block", my_yaw, 0)
+
+func block_release() -> void:
+	if not blocking:
+		return
+	blocking = false
+	net.send_act("unblock", my_yaw, 0)
+
+## light | heavy | roll | parry. Plays at once on your own character; the server checks stamina and
+## timing, owns the i-frames, parry window and damage.
+func _act(kind: String) -> void:
+	if me == null or me.dead or state != "play" or follow_server or me.flags & (4 | 32) != 0:
+		return
+	if act_lock > 0 or roll_t > 0:
+		buffered = kind
+		buffered_t = clock
+		return
+	if me.stam <= 0:
+		hud.stamina_flash()
+		return
+	var lt: UnitView = views.get(target_id) if locked else null
+	var yaw := my_yaw
+	var tid := target_id if locked else 0
+	if kind == "roll":
+		if move_dir.length() > 0.2:
+			roll_dir = move_dir.normalized()
+			yaw = atan2(roll_dir.x, roll_dir.z)
+		else:
+			kind = "backstep"
+			roll_dir = -Vector3(sin(my_yaw), 0, cos(my_yaw))
+		var a: Dictionary = D.ACTS[kind]
+		roll_dist = a.dist
+		roll_total = a.lock
+		roll_t = a.lock
+		if blocking:
+			block_release()
+		if kind == "roll":
+			me.play_act("roll", 1.35)
+			me.local_act_ms = Time.get_ticks_msec()
+	else:
+		if lt:
+			yaw = atan2(lt.position.x - my_pos.x, lt.position.z - my_pos.z)
+		elif kind != "parry":
+			var melee: bool = D.CLASSES[me.info.body].melee
+			var aim := atan2(move_dir.x, move_dir.z) if move_dir.length() > 0.2 else (my_yaw if melee else cam_yaw)
+			var soft := _soft_target(aim, 5.5 if melee else D.AIM_RANGE, 1.0 if melee else 0.45)
+			yaw = atan2(soft.position.x - my_pos.x, soft.position.z - my_pos.z) if soft else aim
+			if soft and not melee:
+				tid = soft.id
+		var anim := ""
+		match kind:
+			"light":
+				combo = (combo + 1) % 2
+				anim = ("attack" if combo == 0 else "attack2") if D.CLASSES[me.info.body].melee else "release"
+			"heavy":
+				anim = "smash" if D.CLASSES[me.info.body].melee else "release"
+			"parry":
+				anim = "attack2"
+		me.play_act(anim, 1.8 if kind == "parry" else (1.5 if kind == "light" else 1.0))
+		me.local_act_ms = Time.get_ticks_msec()
+	act_lock = D.ACTS[kind].lock
+	my_yaw = yaw
+	net.send_move(my_pos, my_yaw, 0.0)
+	net.send_act(kind, yaw, tid)
+	hud.pressed(kind)
+
+var combo := 0
+
+## The enemy an unlocked attack turns toward: the nearest one in a cone around aim.
+func _soft_target(aim: float, reach: float, cone: float) -> UnitView:
+	var best: UnitView = null
+	var bs := INF
+	for id in views:
+		var v: UnitView = views[id]
+		if not v.is_enemy() or v.dead:
+			continue
+		var d := Vector2(v.position.x - my_pos.x, v.position.z - my_pos.z).length()
+		var off := absf(angle_difference(aim, atan2(v.position.x - my_pos.x, v.position.z - my_pos.z)))
+		if d > reach + v.info.r or off > cone or not lv.line_clear(my_pos, v.position):
+			continue
+		var sc := d + off * 6.0
+		if sc < bs:
+			bs = sc
+			best = v
+	return best
+
+## Lock on to the enemy nearest the middle of the screen, or let go. With nothing to lock, the camera
+## swings back behind you.
+func toggle_lock() -> void:
+	if locked:
+		_unlock()
+		return
+	var best := 0
+	var bs := INF
+	var mid := get_viewport().get_visible_rect().size / 2.0
+	for id in _lock_candidates():
+		var v: UnitView = views[id]
+		var sp := cam.unproject_position(v.chest())
+		var sc := sp.distance_to(mid) + v.position.distance_to(my_pos) * 6.0
+		if sc < bs:
+			bs = sc
+			best = id
+	if best:
+		locked = true
+		flick = 0.0
+		_set_target(best, false)
+	else:
+		recenter = true
+
+func _unlock() -> void:
+	locked = false
+	if target_id and views.has(target_id) and views[target_id].is_enemy():
+		_set_target(0, false)
+
+func _lock_candidates() -> Array:
+	var out: Array = []
+	for id in views:
+		var v: UnitView = views[id]
+		if not v.is_enemy() or v.dead or v.position.distance_to(my_pos) > 30.0:
+			continue
+		if cam.is_position_behind(v.chest()) or not lv.line_clear(my_pos, v.position):
+			continue
+		out.append(id)
+	return out
+
+## Move the lock to the next enemy to the left (-1) or right (+1) on screen.
+func _switch_lock(side: int) -> void:
+	var cur: UnitView = views.get(target_id)
+	if cur == null:
+		return
+	var cx := cam.unproject_position(cur.chest()).x
+	var best := 0
+	var bd := INF
+	for id in _lock_candidates():
+		if id == target_id:
+			continue
+		var dx: float = cam.unproject_position(views[id].chest()).x - cx
+		if signf(dx) == side and absf(dx) < bd:
+			bd = absf(dx)
+			best = id
+	if best:
+		_set_target(best, false)
+
+func _check_lock() -> void:
+	var v: UnitView = views.get(target_id)
+	if v == null or v.dead or not v.is_enemy() or v.position.distance_to(my_pos) > 40.0:
+		locked = false
+		# Souls hands the lock to the next enemy when the one you held dies, if one is close
+		var next := 0
+		var bd := 14.0
+		for id in views:
+			var o: UnitView = views[id]
+			if o.is_enemy() and not o.dead and o.flags & 2 != 0 and o.position.distance_to(my_pos) < bd:
+				bd = o.position.distance_to(my_pos)
+				next = id
+		if next:
+			locked = true
+			_set_target(next, false)
+		else:
+			_set_target(0, false)
+
+func _capture(on: bool) -> void:
+	if Quality.touch:
+		return
+	captured = on
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
+
+## Controller: left stick moves, right stick looks (a flick switches the lock), triggers are edges.
+func _pad_poll(delta: float) -> void:
+	if Input.get_connected_joypads().is_empty():
+		pad_move = Vector2.ZERO
+		return
+	var lx := Input.get_joy_axis(0, JOY_AXIS_LEFT_X)
+	var ly := Input.get_joy_axis(0, JOY_AXIS_LEFT_Y)
+	pad_move = Vector2(lx, -ly) if Vector2(lx, ly).length() > 0.2 else Vector2.ZERO
+	var rx := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
+	var ry := Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+	if locked:
+		if absf(rx) > 0.7 and _pad_flick == 0.0:
+			_pad_flick = signf(rx)
+			_switch_lock(int(_pad_flick))
+		elif absf(rx) < 0.3:
+			_pad_flick = 0.0
+	else:
+		if absf(rx) > 0.15: cam_yaw -= rx * 3.0 * delta
+		if absf(ry) > 0.15: cam_pitch = clampf(cam_pitch - ry * 2.0 * delta, -1.2, 0.5)
+	var rt := Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) > 0.5
+	if rt and not _pad_rt: _act("heavy")
+	_pad_rt = rt
+	var lt := Input.get_joy_axis(0, JOY_AXIS_TRIGGER_LEFT) > 0.5
+	if lt and not _pad_lt: _act("parry")
+	_pad_lt = lt
+
 # ------------------------------------------------------------------ input
+## Keyboard and mouse, Souls-style: the mouse is captured and turns the camera.
+##   WASD move (relative to the camera)   Space tap roll / hold sprint   LMB light   Shift+LMB heavy
+##   RMB hold block   Shift+RMB parry   Q or middle mouse lock on   Tab switch lock   R potion
+##   1-5 abilities   F1-F5 party target   E or F loot   Esc free the cursor (click to grab it again)
 func _unhandled_input(e: InputEvent) -> void:
 	if e is InputEventMouseButton:
 		var mb := e as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			cam_dist = clampf(cam_dist - 0.8, CAM_MIN, CAM_MAX)
+			cam_dist = clampf(cam_dist - 0.6, CAM_MIN, CAM_MAX)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			cam_dist = clampf(cam_dist + 0.8, CAM_MIN, CAM_MAX)
-		elif mb.button_index == MOUSE_BUTTON_LEFT or mb.button_index == MOUSE_BUTTON_RIGHT:
-			var left := mb.button_index == MOUSE_BUTTON_LEFT
-			if mb.pressed:
-				if left: lmb = true
-				else: rmb = true
-				drag = 0.0
-				_click_pos = mb.position
+			cam_dist = clampf(cam_dist + 0.6, CAM_MIN, CAM_MAX)
+		elif not captured:
+			# free cursor: click a unit to target it, or click the world to take the camera back
+			if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+				var id := unit_at(mb.position)
+				if id or chest_at(mb.position):
+					_pick(mb.position, false)
+					if id and views[id].is_enemy():
+						locked = true
+				elif not Quality.touch:
+					_capture(true)
+		elif mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+			_act("heavy" if mb.shift_pressed else "light")
+		elif mb.button_index == MOUSE_BUTTON_RIGHT:
+			if mb.pressed and mb.shift_pressed:
+				_act("parry")
+			elif mb.pressed:
+				block_press()
 			else:
-				if left: lmb = false
-				else: rmb = false
-				if drag < 6.0:
-					_pick(mb.position, not left)
-			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if (lmb or rmb) else Input.MOUSE_MODE_VISIBLE
-			if not (lmb or rmb):
-				Input.warp_mouse(_click_pos)
-	elif e is InputEventMouseMotion and (lmb or rmb):
-		var mm := e as InputEventMouseMotion
-		drag += mm.relative.length()
-		cam_yaw -= mm.relative.x * 0.006
-		cam_pitch = clampf(cam_pitch - mm.relative.y * 0.005, -1.25, 0.45)
-		if rmb and me and not me.dead and me.flags & 32 == 0:
-			my_yaw = cam_yaw
-	elif e is InputEventKey and e.pressed and not e.echo:
+				block_release()
+		elif mb.button_index == MOUSE_BUTTON_MIDDLE and mb.pressed:
+			toggle_lock()
+	elif e is InputEventMouseMotion and captured:
+		_look((e as InputEventMouseMotion).relative)
+	elif e is InputEventJoypadButton:
+		var jb := e as InputEventJoypadButton
+		match jb.button_index:
+			JOY_BUTTON_RIGHT_SHOULDER:
+				if jb.pressed: _act("light")
+			JOY_BUTTON_LEFT_SHOULDER:
+				if jb.pressed: block_press()
+				else: block_release()
+			JOY_BUTTON_B:
+				if jb.pressed: dodge_press()
+				else: dodge_release()
+			JOY_BUTTON_RIGHT_STICK:
+				if jb.pressed: toggle_lock()
+			JOY_BUTTON_X:
+				if jb.pressed: _use("potion")
+			JOY_BUTTON_A:
+				if jb.pressed and chest and my_pos.distance_to(chest_pos) < 5.0: net.send_loot()
+			JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_RIGHT, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_Y:
+				if jb.pressed:
+					_use_slot([JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_RIGHT, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_Y].find(jb.button_index))
+	elif e is InputEventKey and not e.echo:
 		var k := (e as InputEventKey).physical_keycode
+		if k == KEY_SPACE:
+			if e.pressed: dodge_press()
+			else: dodge_release()
+			return
+		if not e.pressed:
+			return
 		if k >= KEY_1 and k <= KEY_5:
 			_use_slot(k - KEY_1)
 		elif k == KEY_6 or k == KEY_R:
 			_use("potion")
+		elif k == KEY_Q:
+			toggle_lock()
 		elif k == KEY_TAB:
-			_tab_target()
+			if locked: _switch_lock(-1 if (e as InputEventKey).shift_pressed else 1)
+			else: toggle_lock()
 		elif k >= KEY_F1 and k <= KEY_F5:
+			locked = false
 			_party_target(k - KEY_F1)
-		elif k == KEY_F:
+		elif k == KEY_F or k == KEY_E:
 			if chest and my_pos.distance_to(chest_pos) < 5.0:
 				net.send_loot()
 		elif k == KEY_ESCAPE:
-			_set_target(0, false)
+			_capture(false)
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		dodge_down = false
+		block_release()
 
 var _click_pos := Vector2.ZERO
 
@@ -463,7 +788,7 @@ var cursor_kind := ""
 func _update_hover() -> void:
 	var kind := "pointer"
 	var id := 0
-	if not (lmb or rmb):
+	if not captured:
 		var at := get_viewport().get_mouse_position()
 		if chest_at(at):
 			kind = "interact" if my_pos.distance_to(chest_pos) < 5.0 else "no"
@@ -481,27 +806,12 @@ func _update_hover() -> void:
 		cursor_kind = kind
 		Cursors.set_kind(kind)
 
+## Abilities that need an enemy lock on to one if you have none (see toggle_lock).
 func _tab_target() -> void:
-	var cands: Array = []
-	var f := Vector3(sin(my_yaw), 0, cos(my_yaw))
-	for id in views:
-		var v: UnitView = views[id]
-		if not v.is_enemy() or v.dead:
-			continue
-		var to := v.position - my_pos
-		var d := to.length()
-		if d > 40 or not lv.line_clear(my_pos, v.position):
-			continue
-		var facing := f.dot(to / maxf(d, 0.01))
-		cands.append([d - facing * 8.0, id])
-	if cands.is_empty():
-		return
-	cands.sort_custom(func(a, b): return a[0] < b[0])
-	var idx := 0
-	for k in cands.size():
-		if cands[k][1] == target_id:
-			idx = (k + 1) % cands.size()
-	_set_target(cands[idx][1], false)
+	if locked:
+		_switch_lock(1)
+	else:
+		toggle_lock()
 
 func _party_target(i: int) -> void:
 	var party := party_views()
@@ -519,13 +829,27 @@ func party_views() -> Array:
 	return out
 
 # ------------------------------------------------------------------ camera
-## WoW-style: an eye-height pivot, the camera swings in behind you as you run, and a swept sphere
-## against the camera collision layer pulls it in when rock gets in the way (and eases it back out).
+## Souls-style: over the right shoulder, turned by the mouse or right stick and never swung round for
+## you. Locked on, it keeps you and the target in frame. A swept sphere against the camera collision layer
+## pulls it in when rock gets in the way (and eases it back out).
 func _update_camera(delta: float) -> void:
-	var steering := lmb or rmb or touch_move != Vector2.ZERO
-	if not steering and ((moving and _fwd_input >= 0) or follow_server):
-		cam_yaw = lerp_angle(cam_yaw, my_yaw, clampf(delta * (1.5 if follow_server else 3.5), 0, 1))
-	var want_pivot := ground(my_pos) + Vector3(0, PIVOT_H, 0)
+	var lt: UnitView = views.get(target_id) if locked else null
+	if follow_server:
+		cam_yaw = lerp_angle(cam_yaw, my_yaw, clampf(delta * 1.5, 0, 1))
+	elif lt:
+		var to := lt.chest() - (ground(my_pos) + Vector3(0, PIVOT_H, 0))
+		var flat := Vector2(to.x, to.z).length()
+		cam_yaw = lerp_angle(cam_yaw, atan2(to.x, to.z), clampf(delta * 7.0, 0, 1))
+		var want_pitch := clampf(atan2(to.y, maxf(flat, 1.0)) - 0.22, -0.9, 0.25)
+		cam_pitch = lerpf(cam_pitch, want_pitch, clampf(delta * 4.0, 0, 1))
+	elif recenter:
+		cam_yaw = lerp_angle(cam_yaw, my_yaw, clampf(delta * 10.0, 0, 1))
+		cam_pitch = lerpf(cam_pitch, -0.2, clampf(delta * 8.0, 0, 1))
+		if absf(angle_difference(cam_yaw, my_yaw)) < 0.03:
+			recenter = false
+	var head := ground(my_pos) + Vector3(0, PIVOT_H, 0)
+	var right := Vector3(-cos(cam_yaw), 0, sin(cam_yaw))
+	var want_pivot := head + right * _cam_sweep(head, right, SHOULDER, 0.0)
 	cam_pivot = want_pivot if cam_pivot == Vector3.INF else cam_pivot.lerp(want_pivot, clampf(delta * 14.0, 0, 1))
 	cam_zoom = move_toward(cam_zoom, cam_dist, delta * maxf(6.0, absf(cam_dist - cam_zoom) * 6.0))
 	var dir := Vector3(-sin(cam_yaw) * cos(cam_pitch), -sin(cam_pitch), -cos(cam_yaw) * cos(cam_pitch))
@@ -535,19 +859,41 @@ func _update_camera(delta: float) -> void:
 	if shake_amt > 0:
 		pos += Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * shake_amt * 0.25
 		shake_amt = maxf(0.0, shake_amt - delta * 2.5)
-	cam.look_at_from_position(pos, cam_pivot + Vector3(0, 0.15, 0))
+	cam.look_at_from_position(pos, cam_pivot - dir * 4.0)
 	if me:
 		me.model.visible = cam_cur_dist > 1.3
+	_update_lock_dot(lt)
 
-const PIVOT_H := 2.0
+## A small glowing dot on the locked target's chest, drawn over everything.
+func _update_lock_dot(lt: UnitView) -> void:
+	if lock_dot == null:
+		lock_dot = MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.14
+		sm.height = 0.28
+		lock_dot.mesh = sm
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color(1, 0.92, 0.75)
+		m.no_depth_test = true
+		m.disable_fog = true
+		m.render_priority = 10
+		lock_dot.material_override = m
+		add_child(lock_dot)
+	lock_dot.visible = lt != null
+	if lt:
+		lock_dot.global_position = lt.chest()
+
+const PIVOT_H := 1.85
+const SHOULDER := 0.75 # camera sits this far right of your head
+var recenter := false
 const CAM_RADIUS := 0.3
 var cam_pivot := Vector3.INF
-var cam_zoom := 9.0
-var _fwd_input := 0.0
+var cam_zoom := 5.2
 var _cam_shape: SphereShape3D
 
 ## How far the camera can sit from the pivot along dir: a sphere swept against collision layer 2.
-func _cam_sweep(pivot: Vector3, dir: Vector3, dist: float) -> float:
+func _cam_sweep(pivot: Vector3, dir: Vector3, dist: float, min_d := 0.4) -> float:
 	if _cam_shape == null:
 		_cam_shape = SphereShape3D.new()
 		_cam_shape.radius = CAM_RADIUS
@@ -560,7 +906,7 @@ func _cam_sweep(pivot: Vector3, dir: Vector3, dist: float) -> float:
 	var d := dist * r[0]
 	# never inside the floor either
 	var floor_t := (pivot.y - lv.floor_y(pivot.x, pivot.z) - 0.4) / maxf(-dir.y, 0.001) if dir.y < 0 else INF
-	return clampf(minf(d, floor_t), 0.4, dist)
+	return clampf(minf(d, floor_t), min_d, dist)
 
 # ------------------------------------------------------------------ effects
 func _float_text(id: int, text: String, style: String) -> void:

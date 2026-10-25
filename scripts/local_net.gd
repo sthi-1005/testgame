@@ -64,6 +64,10 @@ func send_move(pos: Vector3, yaw: float, dt: float) -> void:
 func send_use(ab: String, target_id: int) -> void:
 	sim.player_use(PEER, ab, target_id)
 
+func send_act(kind: String, yaw: float, target_id: int) -> void:
+	if bot == null:
+		sim.player_act(PEER, kind, yaw, target_id)
+
 func send_target(id: int, attack: bool) -> void:
 	sim.player_target(PEER, id, attack)
 

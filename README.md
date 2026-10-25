@@ -13,8 +13,23 @@ Engine: Godot 4.7 (standard build, GDScript only, Compatibility renderer so the 
 
 Open the project in Godot 4.7 and press F5, or run `godot --path .`. Pick a class and choose Play solo; AI companions fill the party.
 
-Controls: WASD to move (A/D turn, or strafe while holding the right mouse button), right-drag to steer, left-drag to look around, wheel to zoom.
-Click a unit to target it, right-click an enemy to attack, Tab for the next enemy, F1-F5 for party members, 1-5 for abilities, 6 or R for a potion, F to loot.
+Controls are Souls-style: an over-the-shoulder camera on the mouse, movement relative to the camera,
+lock-on, stamina-gated attacks, a dodge roll with i-frames, block and parry. Enemies wind up before they
+swing, so you can roll through a blow, step out of its arc, block it or parry it.
+
+| Action | Keyboard and mouse | Controller | Phone |
+|---|---|---|---|
+| Move / look | WASD / mouse | left stick / right stick | left thumbstick / drag |
+| Light / heavy attack | LMB / Shift+LMB | RB / RT | Attack / Heavy |
+| Block (hold) / parry | RMB / Shift+RMB | LB / LT | Block / Parry |
+| Roll (tap) / sprint (hold) | Space | B | Roll |
+| Lock on / switch target | Q or middle mouse / Tab or flick the mouse | R3 / flick the right stick | Lock / tap an enemy |
+| Abilities, potion, loot | 1-5, R, E | d-pad + Y, X, A | hotbar, Loot |
+
+F1-F5 target party members (for heals). Esc frees the cursor; click the world to take the camera back.
+Casters (the Mage) throw a bolt with the attack buttons, at the locked target or whatever is ahead.
+Stamina regenerates after a short pause; with an empty bar you can't attack, roll or parry, and a block
+that runs it dry breaks your guard. `tools/souls_test.gd` checks all of this headless.
 
 ## Layout
 
@@ -103,6 +118,7 @@ about 22 KB/s down and under 1 KB/s up per player.
 godot --headless -s tools/bottest.gd -- sellsword   # bot plays the slice as a class (sellsword|cleric|mage)
 godot --path . --rendering-driver opengl3 -s tools/shots.gd   # renders review stills to user://
 godot --headless -s tools/bottest.gd -- mage 600 x 7 --stage coast   # the same bot on another stage
+godot --headless --path . -s tools/souls_test.gd -- --class sellsword --stage coast   # Souls-style controls: input, i-frames, block, parry, stamina
 godot --path . --rendering-driver vulkan -s stages/coast/tools/coast_shots.gd -- _a [shot]   # Tidecrown Ruins stills
 ```
 

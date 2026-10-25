@@ -3,7 +3,7 @@ extends RefCounted
 ## The authoritative game simulation: units, combat, abilities, enemy and party AI, the Gorrak fight.
 ## Only the server runs it (in solo play the local game is the server). Clients get snapshots and events.
 
-const SNAP_STRIDE := 22
+const SNAP_STRIDE := 23
 const BASE_IDX := { "idle": 0, "combatIdle": 1, "run": 2, "walk": 3, "back": 4, "cast": 8 }
 
 var lv: Level
@@ -136,6 +136,8 @@ func spawn_member(cls: String, p: Vector3, peer: int) -> SUnit:
 	u.max_res = 100.0 if c.res == "rage" else float(c.mana)
 	u.res = 0.0 if c.res == "rage" else u.max_res
 	u.melee = c.melee
+	u.guard = c.guard
+	u.souls = peer != 0
 	for a in D.ABILITIES[cls]:
 		u.cds[a.id] = 0.0
 	u.cds["potion"] = 0.0
@@ -173,6 +175,9 @@ func drop_player(peer: int) -> void:
 	players.erase(peer)
 	u.peer = 0
 	u.ai = true
+	u.souls = false
+	u.blocking = false
+	u.sprinting = false
 	chat("%s's player left. %s fights on." % [u.short, u.short], "sys")
 
 func leader_unit() -> SUnit:
@@ -237,6 +242,14 @@ func roll_weapon(u: SUnit) -> float:
 func deal_damage(src: SUnit, t: SUnit, amt: float, o := {}) -> float:
 	if t == null or t.dead:
 		return 0.0
+	var dodgeable: bool = o.get("can_crit", true) # ticks (burns, the tide) can't be rolled through or blocked
+	if t.iframe > 0 and dodgeable and src != t:
+		float_text(t, "Dodged", "abs")
+		return 0.0
+	var front := src != null and src != t and absf(angle_difference(t.yaw, atan2(src.pos.x - t.pos.x, src.pos.z - t.pos.z))) < 1.4
+	if t.parry_t > 0 and o.get("melee", false) and front:
+		_parried(t, src)
+		return 0.0
 	var a := mitigate(t, amt) if o.get("phys", true) else amt
 	var crit: bool = o.get("can_crit", true) and randf() < o.get("crit", 0.08)
 	if crit:
@@ -245,6 +258,23 @@ func deal_damage(src: SUnit, t: SUnit, amt: float, o := {}) -> float:
 		a *= 0.5
 	if t.vuln > 0:
 		a *= 1.5
+	if t.blocking and dodgeable and front and t.stun <= 0:
+		var stopped := a * t.guard
+		if t.stam >= stopped:
+			t.spend(stopped)
+			a -= stopped
+			float_text(t, "Blocked", "abs")
+			fx("hit", t.pos + t.fwd() * 0.6 + Vector3(0, 1.4, 0), { "color": Color(0.9, 0.85, 0.7) })
+			sfx("block", t.pos)
+		else:
+			# guard break: the shield arm is knocked wide and the blow lands in full
+			t.spend(t.stam)
+			t.blocking = false
+			t.stun = maxf(t.stun, 1.0)
+			t.act_lock = maxf(t.act_lock, 1.0)
+			float_text(t, "Guard broken!", "crit")
+			t.play("hit", 1.0)
+			shake(0.35, t)
 	a = maxf(1.0, roundf(a))
 	if t.absorb > 0:
 		var ab := minf(t.absorb, a)
@@ -690,8 +720,10 @@ func tick_unit(u: SUnit, dt: float) -> void:
 		if not in_combat and combat_t > 3:
 			u.hp = minf(u.max_hp, u.hp + dt * u.max_hp * 0.06)
 	update_cast(u, dt)
+	if u.souls:
+		_tick_souls(u, dt)
 	# melee auto attack
-	var t: SUnit = u.target if (not u.peer or u.auto_attack) else null
+	var t: SUnit = u.target if (not u.peer or (u.auto_attack and not u.souls)) else null
 	if u.swing > 0:
 		u.swing -= dt
 	if t and hostile(u, t) and t.alive() and u.cast.is_empty() and u.stun <= 0 and (u.is_enemy() or u.melee):
@@ -702,8 +734,23 @@ func tick_unit(u: SUnit, dt: float) -> void:
 			if u.is_enemy() or u.ai:
 				u.face_to(t.pos)
 			var big := u.boss != "" and randf() < 0.35
-			u.play("attack2" if big else "attack", 1.1 if u.boss != "" else 1.3)
 			var amt := roll_weapon(u) * (0.7 if u.kind == "cleric" else 1.0)
+			if u.is_enemy():
+				# a readable wind-up, committed to the direction it started in: roll through it, step
+				# out of its arc, block it or parry it
+				var wind := 0.62 if u.boss != "" else 0.5
+				u.play("attack2" if big else "attack", 0.8 if u.boss != "" else 0.85)
+				if u.boss == "":
+					u.busy = maxf(u.busy, wind + 0.15)
+				later(wind, func():
+					if u.dead or t.dead or u.stun > 0 or u.dist_to(t) > D.MELEE + 1.0:
+						return
+					if absf(angle_difference(u.yaw, atan2(t.pos.x - u.pos.x, t.pos.z - u.pos.z))) > 1.3:
+						return
+					if deal_damage(u, t, amt, { "threat": 1.0, "melee": true }) > 0:
+						_impact(t, Color(1, 0.5, 0.4)))
+				return
+			u.play("attack2" if big else "attack", 1.1 if u.boss != "" else 1.3)
 			_swing_at(u, t, func():
 				deal_damage(u, t, amt, { "threat": 1.0 })
 				_impact(t, Color(1, 0.5, 0.4) if u.is_enemy() else Color(1, 0.9, 0.7))
@@ -1503,7 +1550,7 @@ func player_move(peer: int, p: Vector3, yaw: float, dt: float) -> void:
 		if moved > 0.05:
 			u.tp_seq += 1
 		return
-	var limit := u.speed * 1.6 * maxf(dt, 1.0 / D.TICK) + 0.6
+	var limit := u.speed * 2.4 * maxf(dt, 1.0 / D.TICK) + 0.8 # room for sprints and rolls
 	if moved > limit or lv.solid_at(p.x, p.z, u.r * 0.5):
 		u.tp_seq += 1
 		return
@@ -1513,8 +1560,12 @@ func player_move(peer: int, p: Vector3, yaw: float, dt: float) -> void:
 		back = dv.dot(u.fwd()) < -0.3
 	u.moving = moved > 0.02
 	u.pos = Vector3(p.x, 0, p.z)
-	if u.moving:
-		u.set_base("back" if back else "run", -0.9 if back else (0.75 if u.slow > 0 else 1.05))
+	if u.rolling > 0:
+		pass
+	elif u.blocking:
+		u.set_base("block")
+	elif u.moving:
+		u.set_base("back" if back else "run", -0.9 if back else (0.75 if u.slow > 0 else (1.4 if u.sprinting else 1.05)))
 	elif u.cast.is_empty():
 		u.set_base("combatIdle" if in_combat and u.melee else "idle")
 
@@ -1527,12 +1578,155 @@ func player_use(peer: int, ab_id: String, target_id: int) -> void:
 		if t:
 			u.target = t
 	var ab := D.ability(u.kind, ab_id)
-	if ab.is_empty():
+	if ab.is_empty() or u.act_lock > 0.15:
 		return
 	var t_over: SUnit = null
 	if ab.target == "ally" and u.target and u.target.team == "party" and u.target.alive():
 		t_over = u.target
 	try_use(u, ab_id, t_over)
+
+## A Souls-style action from a player: light / heavy attack, roll, backstep, parry, and the held
+## states block / unblock, sprint / unsprint. yaw is the way the player faced when pressing it; target_id
+## is the lock-on target (casters aim their bolt at it).
+func player_act(peer: int, kind: String, yaw: float, target_id: int) -> void:
+	var u: SUnit = players.get(peer)
+	if u == null or state != "play" or u.dead:
+		return
+	act(u, kind, yaw, by_id.get(target_id))
+
+func act(u: SUnit, kind: String, yaw: float, t: SUnit = null) -> bool:
+	match kind:
+		"block":
+			u.blocking = u.stun <= 0
+			return true
+		"unblock":
+			u.blocking = false
+			return true
+		"sprint":
+			u.sprinting = true
+			return true
+		"unsprint":
+			u.sprinting = false
+			return true
+	if not D.ACTS.has(kind):
+		return false
+	# a little slack on the lock: the client buffers the next press and sends it as the lock ends
+	if u.stun > 0 or u.act_lock > 0.12 or u.stam <= 0 or not u.charging.is_empty() or u.driven:
+		return false
+	var a: Dictionary = D.ACTS[kind]
+	end_cast(u, false)
+	u.yaw = yaw
+	u.spend(a.cost)
+	u.act_lock = a.lock
+	match kind:
+		"roll", "backstep":
+			u.iframe = a.iframe
+			u.rolling = a.lock
+			u.blocking = false
+			u.sprinting = false
+			if kind == "roll":
+				u.play("roll", 1.35)
+		"parry":
+			u.parry_t = a.window
+			u.play("attack2", 1.8)
+			sfx("swing", u.pos)
+		"light", "heavy":
+			if u.melee:
+				_melee_act(u, kind, a)
+			else:
+				_bolt_act(u, kind, a, t)
+	return true
+
+func _melee_act(u: SUnit, kind: String, a: Dictionary) -> void:
+	u.combo = (u.combo + 1) % 2 if kind == "light" else 0
+	if kind == "heavy":
+		u.play("smash", 1.0)
+	else:
+		u.play("attack" if u.combo == 0 else "attack2", 1.5)
+	var wpn := roll_weapon(u)
+	later(a.hit, func():
+		if u.dead or u.stun > 0:
+			return
+		var hit := false
+		for e in enemies.duplicate():
+			if not e.alive() or u.dist_to(e) > D.MELEE * 0.6 + a.reach:
+				continue
+			if absf(angle_difference(u.yaw, atan2(e.pos.x - u.pos.x, e.pos.z - u.pos.z))) > a.arc:
+				continue
+			deal_damage(u, e, wpn * a.dmg, { "threat": 1.5 })
+			_impact(e, Color(1, 0.9, 0.7))
+			if a.has("stagger") and e.boss == "" and e.alive():
+				e.stun = maxf(e.stun, a.stagger)
+			hit = true
+		sfx("hit" if hit else "swing", u.pos))
+
+func _bolt_act(u: SUnit, kind: String, a: Dictionary, t: SUnit) -> void:
+	if t == null or not hostile(u, t) or t.dead or _d(t.pos, u.pos) > D.AIM_RANGE + 4 or not lv.line_clear(u.pos, t.pos):
+		t = aim_target(u)
+	var b: Dictionary = D.BOLT[kind]
+	u.play("release", 1.6 if kind == "light" else 1.0)
+	if t == null:
+		fx("burst", u.pos + u.fwd() * 1.2 + Vector3(0, 1.4, 0), { "color": Color(0.7, 0.6, 1), "n": 10, "speed": 2.0 })
+		return
+	u.face_to(t.pos)
+	var dmg := randf_range(b.dmg[0], b.dmg[1])
+	var col := Color(0.7, 0.6, 1) if kind == "light" else Color(0.85, 0.5, 1)
+	later(a.hit * 0.6, func():
+		if u.dead or t.dead:
+			return
+		projectile(u, t, col, b.speed, b.size, func():
+			deal_damage(u, t, dmg, { "phys": false, "threat": 1.2 })))
+	sfx("cast", u.pos)
+
+## The enemy a caster's unlocked bolt flies at: the nearest one in a cone ahead, in sight.
+func aim_target(u: SUnit) -> SUnit:
+	var best: SUnit = null
+	var bs := INF
+	for e in enemies:
+		if not e.alive():
+			continue
+		var d := _d(e.pos, u.pos)
+		var off := absf(angle_difference(u.yaw, atan2(e.pos.x - u.pos.x, e.pos.z - u.pos.z)))
+		if d > D.AIM_RANGE or off > 0.6 or not lv.line_clear(u.pos, e.pos):
+			continue
+		var sc := d + off * 20.0
+		if sc < bs:
+			bs = sc
+			best = e
+	return best
+
+func _parried(t: SUnit, src: SUnit) -> void:
+	float_text(src, "Parried!", "crit")
+	fx("flash", t.pos + t.fwd() * 0.8 + Vector3(0, 1.4, 0), { "color": Color(1, 0.9, 0.6), "energy": 3.0, "dur": 0.25, "range": 8.0 })
+	fx("hit", t.pos + t.fwd() * 0.8 + Vector3(0, 1.4, 0), { "color": Color(1, 0.95, 0.7) })
+	sfx("block", t.pos)
+	t.parry_t = 0
+	t.act_lock = 0 # free to riposte at once
+	if src.boss == "":
+		src.stun = maxf(src.stun, 2.0)
+		src.vuln = maxf(src.vuln, 2.0)
+		src.play("hit", 0.8)
+	else:
+		src.vuln = maxf(src.vuln, 1.2)
+	shake(0.25, t)
+
+func _tick_souls(u: SUnit, dt: float) -> void:
+	u.act_lock = maxf(0.0, u.act_lock - dt)
+	u.iframe = maxf(0.0, u.iframe - dt)
+	u.rolling = maxf(0.0, u.rolling - dt)
+	u.parry_t = maxf(0.0, u.parry_t - dt)
+	if u.stun > 0:
+		u.blocking = false
+	if u.sprinting and u.moving:
+		u.stam -= D.SPRINT_DRAIN * dt
+		u.stam_wait = maxf(u.stam_wait, 0.3)
+		if u.stam <= 0:
+			u.stam = 0
+			u.sprinting = false
+	elif u.stam_wait > 0:
+		u.stam_wait -= dt
+	else:
+		u.stam = minf(D.STAMINA, u.stam + dt * D.STAM_REGEN * (D.STAM_BLOCK_REGEN if u.blocking else 1.0))
 
 func player_target(peer: int, target_id: int, attack: bool) -> void:
 	var u: SUnit = players.get(peer)
@@ -1624,6 +1818,9 @@ func _revive(m: SUnit, at: Vector3, pct: float) -> void:
 	m.buffs = []
 	m.cast = {}
 	m.stun = 0
+	m.stam = D.STAMINA
+	m.blocking = false
+	m.act_lock = 0
 	m.play("spawn", 1.0)
 	m.set_base("idle")
 
@@ -1710,9 +1907,13 @@ func snapshot() -> PackedFloat32Array:
 		if not u.has_buff("renew").is_empty(): flags |= 512
 		if not u.has_buff("ward").is_empty(): flags |= 1024
 		if not u.has_buff("burn").is_empty(): flags |= 2048
+		if u.blocking: flags |= 4096
+		if u.iframe > 0: flags |= 8192
+		if u.sprinting and u.moving: flags |= 16384
 		s[i + 19] = flags
 		s[i + 20] = u.tp_seq
 		s[i + 21] = u.potions
+		s[i + 22] = u.stam
 		i += SNAP_STRIDE
 	return s
 
