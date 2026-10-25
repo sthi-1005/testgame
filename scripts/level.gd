@@ -1,7 +1,9 @@
 class_name Level
 extends RefCounted
-## Saltrock Mines layout, collision and pathfinding. The server and every client build the
+## A stage's layout, collision and pathfinding. The server and every client build the
 ## same Level from a fixed seed, so obstacle positions always agree.
+## This base class is Saltrock Mines. Other stages extend it (see stages/stages.gd) and override
+## _configure(), _layout() and the stage hooks.
 ## x grows east, z grows south. The entrance is in the south, the boss hall in the northeast.
 
 const T := 4.0 # one grid cell = one KayKit floor tile
@@ -10,6 +12,13 @@ const GH := 28
 const ZONE_H := { "hall": 12.0, "gate": 12.0 }
 const ZONE_NAMES := { "mouth": "Saltrock Mines", "diggings": "The Lower Diggings", "cut": "Timber Cut", "sorting": "Sorting Cave",
 	"cut2": "Timber Cut", "hall": "Overseer's Hall", "gate": "Overseer's Hall" }
+
+# per-stage settings (subclasses set these in _configure)
+var stage_id := "saltrock"
+var gw := GW # grid size in cells
+var gh := GH
+var zone_names: Dictionary = ZONE_NAMES
+var arena_zones: Array = ["hall", "gate"] # the boss evades when the whole party is outside these
 
 var grid := PackedByteArray() # 0 solid, 1 floor
 var zone_of: Array[String] = []
@@ -22,14 +31,27 @@ var astar: AStarGrid2D
 var rng := RandomNumberGenerator.new()
 
 # fine navigation grid: one world unit per cell
-var NW := int(GW * T)
-var NH := int(GH * T)
+var NW := 0
+var NH := 0
 
 func _init() -> void:
 	rng.seed = 1337
-	grid.resize(GW * GH)
-	zone_of.resize(GW * GH)
+	_configure()
+	NW = int(gw * T)
+	NH = int(gh * T)
+	grid.resize(gw * gh)
+	zone_of.resize(gw * gh)
 	zone_of.fill("")
+	_layout()
+	_index_obst()
+	_build_nav()
+
+## Stage settings (grid size, names, seed). Runs before the grid is allocated.
+func _configure() -> void:
+	pass
+
+## Carve the walkable cells and place obstacles and decor.
+func _layout() -> void:
 	carve(3, 15, 4, 26, "mouth")
 	carve(1, 7, 9, 14, "diggings")
 	carve(10, 10, 14, 11, "cut")
@@ -39,20 +61,58 @@ func _init() -> void:
 	carve(27, 0, 29, 1, "gate")
 	_build_structure()
 	_decorate()
-	_index_obst()
-	_build_nav()
+
+# ------------------------------------------------------------------ stage hooks (override per stage)
+## Ground height under a point. Visual only: collision and the sim stay 2D on the grid.
+func floor_y(_x: float, _z: float) -> float:
+	return 0.0
+
+## Enemy spawns: [type, cell x, cell z, pack, facing].
+func spawns() -> Array:
+	return D.SPAWNS
+
+## Extra enemy types for this stage, looked up before D.ENEMIES.
+func enemy_defs() -> Dictionary:
+	return {}
+
+func enemy_def(type: String) -> Dictionary:
+	var d := enemy_defs()
+	return d[type] if d.has(type) else D.ENEMIES[type]
+
+## Party start, in cell coordinates.
+func start_spots() -> Array:
+	return [Vector2(3.6, 24.6), Vector2(4.4, 25.2), Vector2(3.2, 25.4), Vector2(4.2, 24.0), Vector2(3.6, 25.9)]
+
+## Where a wiped party regroups before it reaches a checkpoint.
+func start_point() -> Vector3:
+	return W(3.5, 24.5)
+
+## Checkpoints in order: [zone, regroup point]. Reaching a later one out of combat moves the regroup point there.
+func checkpoints() -> Array:
+	return [["sorting", W(15.5, 9.5)], ["hall", W(22, 9.5)]]
+
+func intro_text() -> String:
+	return "The air in the shaft is cold and smells of lamp oil."
+
+## The script for a stage boss (see stages/boss_script.gd), or null. Saltrock's Gorrak lives in Sim.
+func boss_script(_boss: String, _sim) -> Object:
+	return null
+
+## Called once per sim tick, for stage set pieces.
+func tick(_sim, _dt: float) -> void:
+	pass
 
 func carve(x0: int, z0: int, x1: int, z1: int, zone: String) -> void:
 	rects.append([x0, z0, x1, z1, zone])
 	for z in range(z0, z1 + 1):
 		for x in range(x0, x1 + 1):
-			grid[z * GW + x] = 1
-			zone_of[z * GW + x] = zone
+			grid[z * gw + x] = 1
+			zone_of[z * gw + x] = zone
 
 func cell(x: int, z: int) -> int:
-	if x < 0 or z < 0 or x >= GW or z >= GH:
+	if x < 0 or z < 0 or x >= gw or z >= gh:
 		return 0
-	return grid[z * GW + x]
+	return grid[z * gw + x]
 
 func cell_at(wx: float, wz: float) -> int:
 	return cell(floori(wx / T), floori(wz / T))
@@ -60,9 +120,9 @@ func cell_at(wx: float, wz: float) -> int:
 func zone_at(wx: float, wz: float) -> String:
 	var x := floori(wx / T)
 	var z := floori(wz / T)
-	if x < 0 or z < 0 or x >= GW or z >= GH:
+	if x < 0 or z < 0 or x >= gw or z >= gh:
 		return ""
-	return zone_of[z * GW + x]
+	return zone_of[z * gw + x]
 
 func zone_h(zone: String) -> float:
 	return ZONE_H.get(zone, 8.0)
@@ -87,8 +147,8 @@ func near_obst(x: float, z: float) -> Array:
 	var cx := floori(x / T)
 	var cz := floori(z / T)
 	var c: Array = []
-	if cx >= 0 and cz >= 0 and cx < GW and cz < GH:
-		c = ob_grid[cz * GW + cx]
+	if cx >= 0 and cz >= 0 and cx < gw and cz < gh:
+		c = ob_grid[cz * gw + cx]
 	if dyn_obst.is_empty():
 		return c
 	return c + dyn_obst
@@ -156,15 +216,15 @@ func walk_clear(a: Vector3, b: Vector3, r: float) -> bool:
 	return true
 
 func _index_obst() -> void:
-	ob_grid.resize(GW * GH)
-	for i in GW * GH:
+	ob_grid.resize(gw * gh)
+	for i in gw * gh:
 		ob_grid[i] = []
 	for o in obst:
 		var m: float = o[2] + 1.2
 		for z in range(floori((o[1] - m) / T), floori((o[1] + m) / T) + 1):
 			for x in range(floori((o[0] - m) / T), floori((o[0] + m) / T) + 1):
-				if x >= 0 and z >= 0 and x < GW and z < GH:
-					ob_grid[z * GW + x].append(o)
+				if x >= 0 and z >= 0 and x < gw and z < gh:
+					ob_grid[z * gw + x].append(o)
 
 # ------------------------------------------------------------------ pathfinding
 func _build_nav() -> void:
@@ -235,8 +295,8 @@ func _add(kind: String, model: String, pos: Vector3, rot := 0.0, scale = 1.0, ex
 func _build_structure() -> void:
 	# walls on every floor/solid edge, rubble at the foot of some of them
 	var dirs := [[0, -1, 0.0], [1, 0, PI / 2], [0, 1, PI], [-1, 0, -PI / 2]]
-	for z in GH:
-		for x in GW:
+	for z in gh:
+		for x in gw:
 			if not cell(x, z):
 				continue
 			for dd in dirs:
@@ -246,7 +306,7 @@ func _build_structure() -> void:
 					continue
 				var c := W(x, z)
 				var p := Vector3(c.x + dx * (T / 2 + 0.5), 0, c.z + dz * (T / 2 + 0.5))
-				var h := zone_h(zone_of[z * GW + x])
+				var h := zone_h(zone_of[z * gw + x])
 				_add("wall", "dungeon-wall", p, dd[2], 1.0, { "courses": int(h / 4.0), "dx": dx, "dz": dz })
 				if rng.randf() < 0.3:
 					var rp := Vector3(c.x + dx * (T / 2 - 0.6) + rng.randf_range(-1.2, 1.2) * (1 if dz else 0), 0,
@@ -255,8 +315,8 @@ func _build_structure() -> void:
 					_add("prop", m, rp, rng.randf_range(0, TAU), rng.randf_range(1.2, 2.2))
 					obst.append([rp.x, rp.z, 0.8])
 	# pillars on wall corners
-	for z in GH + 1:
-		for x in GW + 1:
+	for z in gh + 1:
+		for x in gw + 1:
 			var a := cell(x - 1, z - 1)
 			var b := cell(x, z - 1)
 			var c2 := cell(x - 1, z)
@@ -267,7 +327,7 @@ func _build_structure() -> void:
 			if n == 2 and ((a and b) or (c2 and d) or (a and c2) or (b and d)):
 				continue # straight wall run
 			var p := Vector3(x * T, 0, z * T)
-			var ph := maxf(zone_h(zone_of[maxi(0, z - 1) * GW + maxi(0, x - 1)]), zone_h(zone_of[mini(GH - 1, z) * GW + mini(GW - 1, x)]))
+			var ph := maxf(zone_h(zone_of[maxi(0, z - 1) * gw + maxi(0, x - 1)]), zone_h(zone_of[mini(gh - 1, z) * gw + mini(gw - 1, x)]))
 			_add("prop", "dungeon-pillar", p, 0.0, Vector3(1.15, ph / 4.0 + 0.05, 1.15))
 			obst.append([p.x, p.z, 0.75])
 

@@ -1,7 +1,7 @@
 extends Node
 ## Dedicated server entry.
 ##   godot --headless --path . res://net/server.tscn -- --port 24565 [--ws]
-##   or any build with: --headless -- --server [--port N] [--ws]
+##   or any build with: --headless -- --server [--port N] [--ws] [--stage id]
 ## --ws serves WebSocket instead of ENet (needed for browser clients).
 
 var _stat_t := 0.0
@@ -14,6 +14,9 @@ func _ready() -> void:
 		port = int(args[i + 1])
 	if "--ws" in args:
 		Net.transport = "ws"
+	i = args.find("--stage")
+	if i >= 0 and i + 1 < args.size() and Stages.has(args[i + 1]):
+		Net.stage = args[i + 1]
 	Engine.max_fps = D.TICK * 4 # headless otherwise spins a core
 	if Net.host_dedicated(port) != OK:
 		printerr(Net.last_error)

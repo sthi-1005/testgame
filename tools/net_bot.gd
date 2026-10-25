@@ -4,9 +4,10 @@ extends Node
 ##   godot --headless --path . res://tools/net_bot.tscn -- --join 127.0.0.1 --cls mage [--secs 60]
 ##   --host --wait 5 : listen-server that starts once 5 players are in the lobby
 ##   --solo          : OfflineMultiplayerPeer
+##   --stage id      : the stage to host (see stages/stages.gd)
 ##   --ws            : WebSocket transport
 
-var lv := Level.new()
+var lv: Level = Stages.make_level(Stages.DEFAULT)
 var cls := "sellsword"
 var secs := 60.0
 var wait := 1
@@ -34,7 +35,10 @@ func _ready() -> void:
 	cls = _arg("--cls", cls)
 	secs = float(_arg("--secs", str(secs)))
 	wait = int(_arg("--wait", "1"))
+	Net.stage = _arg("--stage", Net.stage)
 	Net.world_received.connect(func(w):
+		if w.get("stage", lv.stage_id) != lv.stage_id:
+			lv = Stages.make_level(w.stage)
 		for s in w.spawns:
 			units[int(s.id)] = s)
 	Net.you_are.connect(func(id): me = id)

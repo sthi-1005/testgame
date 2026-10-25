@@ -35,6 +35,7 @@ const CH_DETAIL := 2
 var state := "offline"
 var transport := "ws" if OS.has_feature("web") else "enet" # browsers can't use ENet
 var dedicated := false
+var stage := Stages.DEFAULT # the stage the next run uses (set by the host before start_game)
 var lobby: Array = []
 var my_unit := 0
 var last_error := ""
@@ -305,7 +306,7 @@ func _c_start() -> void:
 	var roster: Array = []
 	for e in lobby:
 		roster.append([e.peer, e.cls])
-	sim = Sim.new(Level.new())
+	sim = Sim.new(Stages.make_level(stage))
 	sim.start(roster)
 	# the world below already holds every unit, so their spawn events would be duplicates
 	sim.events = sim.events.filter(func(e): return e[0] != "spawn")

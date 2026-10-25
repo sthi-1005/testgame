@@ -8,8 +8,10 @@ const CAM_MIN := 3.0
 const CAM_MAX := 20.0
 
 var net: Node
-var lv := Level.new()
+var stage_id := Stages.DEFAULT # set before the node enters the tree; a world from the server can switch it
+var lv: Level
 var wb: WorldBuilder
+var we: WorldEnvironment
 var pool: WorldBuilder.LightPool
 var env: Environment
 var cam: Camera3D
@@ -55,13 +57,9 @@ var chest: Node3D
 var chest_pos := Vector3.INF
 
 func _ready() -> void:
-	wb = WorldBuilder.new(lv, self)
-	wb.build()
-	var we := WorldEnvironment.new()
-	env = Look.make_environment()
-	we.environment = env
+	we = WorldEnvironment.new()
 	add_child(we)
-	pool = WorldBuilder.LightPool.new(self, wb.light_sources, 8)
+	_build_world()
 	cam = Camera3D.new()
 	cam.fov = 58
 	cam.far = 300
@@ -76,6 +74,28 @@ func _ready() -> void:
 	if Quality.touch:
 		add_child(TouchControls.new(self))
 
+## Build the stage's level, world and environment (see stages/stages.gd).
+func _build_world() -> void:
+	lv = Stages.make_level(stage_id)
+	wb = Stages.make_world(stage_id, lv, self)
+	wb.build()
+	env = wb.make_environment() if wb.has_method("make_environment") else Look.make_environment()
+	we.environment = env
+	pool = WorldBuilder.LightPool.new(self, wb.light_sources, 8)
+
+## The server runs a different stage than the one built (a client joining a party): rebuild.
+func _switch_stage(id: String) -> void:
+	wb.root.queue_free()
+	for l in pool.lights:
+		l.queue_free()
+	stage_id = id
+	_build_world()
+	Quality.apply(self)
+
+## A sim position (y is height above the ground) to a world position on this stage's terrain.
+func ground(p: Vector3) -> Vector3:
+	return Vector3(p.x, p.y + lv.floor_y(p.x, p.z), p.z)
+
 func attach(n: Node) -> void:
 	net = n
 	if n.get_parent() == null:
@@ -89,6 +109,8 @@ func attach(n: Node) -> void:
 
 # ------------------------------------------------------------------ network in
 func _on_world(w: Dictionary) -> void:
+	if w.get("stage", stage_id) != stage_id and Stages.has(w.stage):
+		_switch_stage(w.stage)
 	for info in w.spawns:
 		_spawn(info)
 	if w.get("boss", 0):
@@ -156,7 +178,7 @@ func _on_events(evs: Array) -> void:
 			"float":
 				_float_text(e[1], e[2], e[3])
 			"fx":
-				_fx(e[1], e[2], e[3] if e[3] != null else {})
+				_fx(e[1], ground(e[2]), e[3] if e[3] != null else {})
 			"chat":
 				hud.chat(e[1], e[2])
 			"emote":
@@ -206,7 +228,7 @@ func _on_events(evs: Array) -> void:
 				elif e[1] == "wipe":
 					hud.banner("Your party has fallen...", Color(1, 0.4, 0.3))
 			"chest":
-				_chest(e[1], e[2])
+				_chest(ground(e[1]), e[2])
 			"loot":
 				hud.loot()
 				if chest:
@@ -230,10 +252,11 @@ func _process(delta: float) -> void:
 		if id == me_id:
 			continue
 		v.interpolate(render_t)
+		v.position.y += lv.floor_y(v.position.x, v.position.z)
 		var near := v.position.distance_to(my_pos) < 32.0
 		v.plate.visible = not v.dead and (id == hover_id or id == target_id or (near and (v.is_enemy() and (v.flags & 2 != 0 or v.position.distance_to(my_pos) < 22.0))))
 	if me:
-		me.position = my_pos
+		me.position = ground(my_pos)
 		me.model.rotation.y = my_yaw
 	_update_camera(delta)
 	_update_hover()
@@ -241,12 +264,16 @@ func _process(delta: float) -> void:
 	pool.update(my_pos, clock)
 	dust.global_position = cam.global_position + (-cam.global_transform.basis.z * 5.0)
 	var z := lv.zone_at(my_pos.x, my_pos.z)
-	var hall := 1.0 if z == "hall" or z == "gate" else 0.0
-	grade_k = move_toward(grade_k, hall, delta * 0.8)
-	Look.grade(env, grade_k)
+	if wb.has_method("grade"):
+		wb.grade(env, z, delta) # the stage owns its sky and colour grade
+	else:
+		var hall := 1.0 if z == "hall" or z == "gate" else 0.0
+		grade_k = move_toward(grade_k, hall, delta * 0.8)
+		Look.grade(env, grade_k)
 	if z != zone and z != "":
-		if Level.ZONE_NAMES.has(z) and (zone == "" or Level.ZONE_NAMES.get(zone) != Level.ZONE_NAMES[z]):
-			hud.zone_banner(Level.ZONE_NAMES[z])
+		var names := lv.zone_names
+		if names.has(z) and (zone == "" or names.get(zone) != names[z]):
+			hud.zone_banner(names[z])
 		zone = z
 	hud.prompt("Press F to open the strongbox" if chest and my_pos.distance_to(chest_pos) < 5.0 else "")
 
@@ -494,8 +521,8 @@ func party_views() -> Array:
 func _update_camera(delta: float) -> void:
 	if not lmb and not rmb and touch_move == Vector2.ZERO and (moving or follow_server):
 		cam_yaw = lerp_angle(cam_yaw, my_yaw, clampf(delta * (1.5 if follow_server else 3.0), 0, 1))
-	var pivot := my_pos + Vector3(0, 2.2 * Assets.CHAR_SCALE, 0)
-	var ceil := lv.ceil_at(my_pos.x, my_pos.z) - 2.4
+	var pivot := ground(my_pos) + Vector3(0, 2.2 * Assets.CHAR_SCALE, 0)
+	var ceil := lv.ceil_at(my_pos.x, my_pos.z) + lv.floor_y(my_pos.x, my_pos.z) - 2.4
 	# in tight tunnels, swing higher overhead before pulling in close
 	var best_d := -1.0
 	var best_dir := Vector3.ZERO
@@ -528,7 +555,7 @@ func _cam_room(pivot: Vector3, dir: Vector3, ceil: float) -> float:
 		var p := pivot + dir * d
 		if p.y > ceil:
 			p.y = ceil
-		if lv.solid_at(p.x, p.z, 0.6) or p.y < 0.4:
+		if lv.solid_at(p.x, p.z, 0.6) or p.y < lv.floor_y(p.x, p.z) + 0.4:
 			return maxf(d - 0.4, 0.8)
 		d += 0.25
 	return cam_dist
@@ -722,7 +749,7 @@ func _tele(e: Array) -> void:
 		mi.material_override = Look.tele_mat(col, false)
 		mi.mesh = pm
 		add_child(mi)
-		mi.global_position = e[3] + Vector3(0, 0.07, 0)
+		mi.global_position = ground(e[3]) + Vector3(0, 0.07, 0)
 	else:
 		var dir: Vector3 = e[4][0]
 		var length: float = e[4][1]
@@ -731,7 +758,7 @@ func _tele(e: Array) -> void:
 		mi.material_override = Look.tele_mat(col, true)
 		mi.mesh = pm
 		add_child(mi)
-		var from: Vector3 = e[3]
+		var from: Vector3 = ground(e[3])
 		mi.global_position = from + dir * (length / 2) + Vector3(0, 0.07, 0)
 		mi.rotation.y = atan2(dir.x, dir.z)
 	teles[e[1]] = { "node": mi, "dur": e[5], "t": 0.0 }
@@ -752,7 +779,7 @@ func _proj(e: Array) -> void:
 	m.emission_energy_multiplier = 3.0
 	mi.material_override = m
 	add_child(mi)
-	mi.global_position = e[4]
+	mi.global_position = ground(e[4])
 	var trail := CPUParticles3D.new()
 	trail.amount = 24
 	trail.lifetime = 0.35

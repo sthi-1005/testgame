@@ -1,10 +1,11 @@
 extends Node
-## Title screen: pick a class and enter the mine. Solo runs the server in-process (LocalNet).
-## Command line (after `--`): --class <id> skips the menu; --bot autoplays; --shots saves review stills; --server is handled by Net.
+## Title screen: pick a stage and a class. Solo runs the server in-process (LocalNet).
+## Command line (after `--`): --stage <id> picks the stage (stages/stages.gd); --class <id> skips the menu; --bot autoplays; --shots saves review stills; --server is handled by Net.
 
 var menu: Control
 var game: Game
 var cls := "sellsword"
+var stage := Stages.DEFAULT
 var args := {}
 
 func _ready() -> void:
@@ -14,6 +15,8 @@ func _ready() -> void:
 	_parse_args()
 	Quality.setup()
 	Cursors.set_kind("pointer")
+	if args.get("stage") is String and Stages.has(args.stage):
+		stage = args.stage
 	if args.has("class"):
 		cls = args["class"]
 		_start()
@@ -53,10 +56,27 @@ func _build_menu() -> void:
 	title.add_theme_color_override("font_color", Color("#ffcf80"))
 	box.add_child(title)
 	var sub := Label.new()
-	sub.text = "Pick your class. AI companions fill the rest of the party."
+	sub.text = "Pick a stage and a class. AI companions fill the rest of the party."
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.add_theme_color_override("font_color", Color("#c8bca8"))
 	box.add_child(sub)
+	var srow := HBoxContainer.new()
+	srow.add_theme_constant_override("separation", 12)
+	srow.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_child(srow)
+	var sgroup := ButtonGroup.new()
+	for st in Stages.LIST:
+		var sb := Button.new()
+		sb.toggle_mode = true
+		sb.button_group = sgroup
+		sb.custom_minimum_size = Vector2(270, 84)
+		sb.text = "%s\n%s" % [st.name, st.blurb]
+		sb.autowrap_mode = TextServer.AUTOWRAP_WORD
+		sb.add_theme_font_size_override("font_size", 14)
+		sb.button_pressed = st.id == stage
+		var sid: String = st.id
+		sb.pressed.connect(func(): stage = sid)
+		srow.add_child(sb)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 16)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -112,12 +132,14 @@ func _build_menu() -> void:
 ## Host (addr == "") or join a networked party. The lobby sits on top of the game until the run starts.
 func _start_net(addr: String) -> void:
 	var net := get_node("/root/Net")
+	net.stage = stage
 	var err: Error = net.host(cls) if addr == "" else net.join(addr, cls)
 	if err != OK:
 		return
 	menu.queue_free()
 	menu = null
 	game = Game.new()
+	game.stage_id = stage # a joining client switches to the host's stage when the world arrives
 	add_child(game)
 	game.attach(net)
 	var lobby := PanelContainer.new()
@@ -137,7 +159,7 @@ func _start_net(addr: String) -> void:
 	var refresh := func(_x = null):
 		if not is_instance_valid(lobby):
 			return
-		var lines: Array = ["Hosting on port %d" % net.DEFAULT_PORT if addr == "" else "Party at %s (%s)" % [addr, net.state], ""]
+		var lines: Array = ["Hosting %s on port %d" % [Stages.info(net.stage).name, net.DEFAULT_PORT] if addr == "" else "Party at %s (%s)" % [addr, net.state], ""]
 		for p in net.lobby:
 			lines.append("%s  %s" % [D.CLASSES[p.cls].title if D.CLASSES.has(p.cls) else p.cls, "(leader)" if p == net.lobby[0] else ""])
 		if net.last_error != "":
@@ -157,8 +179,10 @@ func _start() -> void:
 		menu.queue_free()
 		menu = null
 	game = Game.new()
+	game.stage_id = stage
 	add_child(game)
 	var net := LocalNet.new()
+	net.stage = stage
 	game.attach(net)
 	net.host_solo(cls)
 	if args.has("bot"):
