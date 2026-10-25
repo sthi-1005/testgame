@@ -15,6 +15,8 @@ const LIST := [
 		"level": "res://stages/skytemple/sky_level.gd", "world": "res://stages/skytemple/sky_builder.gd" },
 	{ "id": "larkspur", "name": "Larkspur Vale", "blurb": "An open valley under a big sky. Cross the river, clear the brigands, storm the hill keep.",
 		"level": "res://stages/larkspur/larkspur_level.gd", "world": "res://stages/larkspur/larkspur_world.gd" },
+	{ "id": "coast", "name": "Tidecrown Ruins", "blurb": "Sunlit cliffs, a palm-lined strand and a temple half sunk in the sea. Ondrak the Brinewarden floods it with every tide.",
+		"level": "res://stages/coast/coast_level.gd", "world": "res://stages/coast/coast_world.gd" },
 ]
 
 static func info(id: String) -> Dictionary:
