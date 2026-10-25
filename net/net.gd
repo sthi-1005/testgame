@@ -21,7 +21,7 @@ signal you_are(unit_id: int)
 signal lobby_changed(lobby: Array) # [{ peer, cls }], leader first
 signal state_changed(state: String) # offline | connecting | lobby | play | disconnected | failed
 
-const PROTOCOL := 1
+const PROTOCOL := 2 # 2: Souls-style actions (_c_act) and stamina in snapshots
 const DEFAULT_PORT := 24565
 const DT := 1.0 / D.TICK
 const KEYFRAME_EVERY := 15 # snapshots between full keyframes (0.5 s)
@@ -145,6 +145,9 @@ func send_move(pos: Vector3, yaw: float, dt: float) -> void:
 
 func send_use(ab: String, target_id: int) -> void:
 	_cmd("_c_use", [ab, target_id])
+
+func send_act(kind: String, yaw: float, target_id: int) -> void:
+	_cmd("_c_act", [kind, yaw, target_id])
 
 func send_target(id: int, attack: bool) -> void:
 	_cmd("_c_target", [id, attack])
@@ -344,6 +347,11 @@ func _c_move(pos: Vector3, yaw: float, dt: float) -> void:
 func _c_use(ab: String, target_id: int) -> void:
 	if multiplayer.is_server() and sim:
 		sim.player_use(_sender(), ab, target_id)
+
+@rpc("any_peer", "reliable")
+func _c_act(kind: String, yaw: float, target_id: int) -> void:
+	if multiplayer.is_server() and sim:
+		sim.player_act(_sender(), kind, yaw, target_id)
 
 @rpc("any_peer", "reliable")
 func _c_target(id: int, attack: bool) -> void:

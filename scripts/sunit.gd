@@ -60,6 +60,23 @@ var charging := {}
 var driven := false # server is moving this player (charge, knockback): the client follows
 var tp_seq := 0 # bumped whenever the server moves a player itself, so the client snaps
 
+# Souls-style actions (players only; AI party members keep their auto attacks)
+var souls := false
+var stam := D.STAMINA
+var stam_wait := 0.0 # regen pauses this long after spending
+var guard := 0.5 # share of frontal damage a block stops
+var act_lock := 0.0 # busy with an attack, roll or parry
+var iframe := 0.0 # dodging: hits pass through
+var rolling := 0.0
+var blocking := false
+var parry_t := 0.0 # parry window still open
+var sprinting := false
+var combo := 0
+
+func spend(cost: float) -> void:
+	stam = maxf(0.0, stam - cost)
+	stam_wait = D.STAM_DELAY
+
 # steering
 var path: Array = []
 var path_t := 0.0

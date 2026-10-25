@@ -79,3 +79,6 @@ func tick(dt: float) -> void:
 				sim.try_use(u, "smite")
 	if u.hp_pct() < 0.3 and u.potions > 0:
 		sim.try_use(u, "potion")
+	# player units have no auto attack: swing (or throw a bolt) between abilities, keeping stamina in hand
+	if u.souls and u.cast.is_empty() and u.act_lock <= 0 and u.stam > 40 and u.dist_to(tg) <= rng:
+		sim.act(u, "heavy" if u.stam > 90 and u.melee else "light", u.yaw, tg)

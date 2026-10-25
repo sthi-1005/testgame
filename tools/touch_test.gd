@@ -117,7 +117,31 @@ func _run() -> void:
 	_touch(5, tb, true)
 	_touch(5, tb, false)
 	game.my_pos = keep
-	_check(game.target_id != 0 and game.views[game.target_id].is_enemy(), "Target button picked enemy %d" % game.target_id)
+	_check(game.target_id != 0 and game.views[game.target_id].is_enemy() and game.locked, "Lock button locked on to enemy %d" % game.target_id)
+	_touch(5, tb, true)
+	_touch(5, tb, false)
+	_check(not game.locked, "Lock again lets go")
+
+	# action pad: Attack, Roll (tap), Block (hold)
+	var pad := {}
+	for b in tc.buttons:
+		pad[(b.node as Button).text] = (b.node as Control).get_global_rect().get_center()
+	_touch(7, pad["Attack"], true)
+	_touch(7, pad["Attack"], false)
+	_check(game.act_lock > 0, "Attack button swung (lock %.2f)" % game.act_lock)
+	await _frames(40)
+	_touch(7, pad["Roll"], true)
+	await _frames(2)
+	_touch(7, pad["Roll"], false)
+	_check(game.roll_t > 0, "Roll tap dodged")
+	await _frames(40)
+	_touch(8, pad["Block"], true)
+	await _frames(4)
+	var su: SUnit = game.net.sim.players[1] if game.net.get("sim") else null
+	_check(game.blocking and (su == null or su.blocking), "Block held raises the guard")
+	_touch(8, pad["Block"], false)
+	await _frames(2)
+	_check(not game.blocking and (su == null or not su.blocking), "Block released lowers it")
 
 	# tap a party member on screen to target them
 	var ally := 0
@@ -125,7 +149,11 @@ func _run() -> void:
 		if v.id != game.me_id and not game.cam.is_position_behind(v.global_position):
 			ally = v.id
 			var at := game.cam.unproject_position(v.global_position + Vector3(0, v.height() * 0.5, 0))
-			if Rect2(Vector2(view.x * 0.42, 0), view - Vector2(view.x * 0.42, 0)).has_point(at):
+			var covered := false
+			for bt in tc.buttons:
+				if (bt.node as Control).is_visible_in_tree() and (bt.node as Control).get_global_rect().grow(8).has_point(at):
+					covered = true
+			if not covered and Rect2(Vector2(view.x * 0.42, 0), view - Vector2(view.x * 0.42, 0)).has_point(at):
 				_touch(6, at, true)
 				_touch(6, at, false)
 				await process_frame

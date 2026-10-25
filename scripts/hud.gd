@@ -24,6 +24,8 @@ var zone_label: Label
 var zone_t := 0.0
 var prompt_label: Label
 var help_label: Label
+var stam_bar: ColorRect # the fill; a ProgressBar won't go thinner than its font
+var stam_flash := 0.0
 var end_panel: Control
 var bubbles: Array = [] # [label3d, t]
 var font_big := 30
@@ -39,11 +41,21 @@ func _ready() -> void:
 	add_child(root)
 	me_frame = _frame(Vector2(16, 16), Vector2(250, 62), true)
 	tgt_frame = _frame(Vector2(282, 16), Vector2(250, 62), true)
+	var stam_bg := ColorRect.new()
+	stam_bg.color = Color(0.1, 0.08, 0.08, 0.85)
+	stam_bg.position = Vector2(16, 83)
+	stam_bg.size = Vector2(250, 7)
+	stam_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(stam_bg)
+	stam_bar = ColorRect.new()
+	stam_bar.size = Vector2(250, 7)
+	stam_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stam_bg.add_child(stam_bar)
 	tot_label = _label("", 13, Color(0.8, 0.8, 0.8))
 	tot_label.position = Vector2(286, 80)
 	root.add_child(tot_label)
 	for i in 4:
-		party_frames.append(_frame(Vector2(16, 96 + i * 52), Vector2(190, 44), false))
+		party_frames.append(_frame(Vector2(16, 102 + i * 52), Vector2(190, 44), false))
 	# boss frame, top centre
 	boss_box = Control.new()
 	boss_box.set_anchors_preset(Control.PRESET_CENTER_TOP)
@@ -82,7 +94,7 @@ func _ready() -> void:
 	banner_label = _center_label(26, Color(1, 0.85, 0.5), 0.3)
 	zone_label = _center_label(40, Color(1, 0.92, 0.75), 0.16)
 	prompt_label = _center_label(18, Color(1, 1, 1), 0.62)
-	var help := _label("WASD move   A/D turn (strafe with right mouse)   Right-drag steer   Left-drag look   Click target   Right-click attack\nTab next enemy   F1-F5 party   1-5 abilities   6 or R potion   F loot   Esc clear target", 12, Color(0.85, 0.82, 0.75, 0.75))
+	var help := _label("WASD move   Mouse look   Space roll (hold: sprint)   LMB attack   Shift+LMB heavy   RMB block   Shift+RMB parry\nQ or middle mouse lock on   Tab switch target   1-5 abilities   R potion   E loot   Esc free the cursor", 12, Color(0.85, 0.82, 0.75, 0.75))
 	help.anchor_left = 1.0
 	help.anchor_right = 1.0
 	help.anchor_top = 1.0
@@ -262,6 +274,9 @@ func _process(delta: float) -> void:
 	if built_for == "":
 		_build_hotbar(me.info.body)
 	_fill(me_frame, me)
+	stam_bar.size.x = 250.0 * clampf(me.stam / D.STAMINA, 0, 1)
+	stam_flash = maxf(0.0, stam_flash - delta * 3.0)
+	stam_bar.color = Color(0.45, 0.8, 0.3).lerp(Color(1, 0.3, 0.2), stam_flash)
 	var t: UnitView = game.views.get(game.target_id)
 	_fill(tgt_frame, t)
 	tot_label.text = ""
@@ -324,6 +339,9 @@ func pressed(id: String) -> void:
 	for s in slots:
 		if s.id == id:
 			s.flash = 1.0
+
+func stamina_flash() -> void:
+	stam_flash = 1.0
 
 func typing() -> bool:
 	return false
