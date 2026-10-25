@@ -71,13 +71,13 @@ void light() {
 const WATER := """
 shader_type spatial;
 render_mode cull_disabled, specular_disabled, depth_draw_opaque;
-uniform sampler2D height_tex : filter_linear, repeat_disable;
+uniform sampler2D height_tex : filter_nearest, repeat_disable; // 16-bit heights packed in RG8 (see CoastWorld.height_texture)
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
 uniform vec4 region = vec4(0.0, 0.0, 1.0, 1.0); // x0, z0, width, depth of the height texture
 uniform float level = -0.6;
-uniform vec4 deep : source_color = vec4(0.07, 0.36, 0.66, 1.0);
-uniform vec4 mid : source_color = vec4(0.1, 0.62, 0.82, 1.0);
-uniform vec4 shallow : source_color = vec4(0.5, 0.92, 0.86, 1.0);
+uniform vec4 deep : source_color = vec4(0.05, 0.33, 0.62, 1.0);
+uniform vec4 mid : source_color = vec4(0.08, 0.56, 0.76, 1.0);
+uniform vec4 shallow : source_color = vec4(0.3, 0.8, 0.78, 1.0);
 uniform vec4 sky : source_color = vec4(0.75, 0.9, 1.0, 1.0);
 uniform float wave_amp = 0.12;
 uniform float foam_k = 1.0;
@@ -85,10 +85,20 @@ uniform float clear = 0.5; // how see-through the shallows are
 uniform float band_d = 0.7; // depth range where foam bands roll in
 varying vec3 wpos;
 
+float h_at(ivec2 c, ivec2 sz) {
+	vec2 rg = texelFetch(height_tex, clamp(c, ivec2(0), sz - 1), 0).rg;
+	return (rg.r * 255.0 * 256.0 + rg.g * 255.0) / 65535.0 * 48.0 - 24.0;
+}
+
+// manual bilinear over packed texels: float textures don't filter on every WebGL2 device
 float ground(vec2 p) {
 	vec2 uv = (p - region.xy) / region.zw;
 	if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return -30.0;
-	return texture(height_tex, uv).r;
+	ivec2 sz = textureSize(height_tex, 0);
+	vec2 f = uv * vec2(sz) - 0.5;
+	ivec2 i = ivec2(floor(f));
+	vec2 t = fract(f);
+	return mix(mix(h_at(i, sz), h_at(i + ivec2(1, 0), sz), t.x), mix(h_at(i + ivec2(0, 1), sz), h_at(i + ivec2(1, 1), sz), t.x), t.y);
 }
 
 void vertex() {
@@ -114,13 +124,13 @@ void fragment() {
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
 	col = mix(col, sky.rgb, fres * 0.5);
 	ALBEDO = mix(col, vec3(1.0), foam);
-	EMISSION = vec3(1.0, 0.98, 0.9) * glint * 0.9 + col * 0.12;
+	EMISSION = vec3(1.0, 0.98, 0.9) * glint * 0.9 + col * 0.04;
 	ALPHA = max(mix(clear, 0.96, smoothstep(0.0, 2.5, d)), foam);
 }
 
 void light() {
 	float ndl = dot(NORMAL, LIGHT) * 0.5 + 0.5;
-	DIFFUSE_LIGHT += LIGHT_COLOR * mix(0.55, 1.0, ndl) * ATTENUATION / PI;
+	DIFFUSE_LIGHT += LIGHT_COLOR * mix(0.45, 0.85, ndl) * ATTENUATION / PI;
 }
 """
 

@@ -377,8 +377,9 @@ func boss_hide() -> void:
 	boss_box.visible = false
 
 func loot() -> void:
-	chat("You pry open the Overseer's strongbox: Gorrak's Iron Collar, a Foreman's Signet and 14 silver.", "loot")
-	banner("Loot: Gorrak's Iron Collar, Foreman's Signet, 14 silver", Color(0.5, 0.85, 1))
+	var l: Array = game.lv.loot_lines()
+	chat(l[0], "loot")
+	banner(l[1], Color(0.5, 0.85, 1))
 
 func victory(s: Dictionary) -> void:
 	end_panel = Panel.new()
@@ -392,7 +393,7 @@ func victory(s: Dictionary) -> void:
 	end_panel.size = Vector2(460, 300)
 	end_panel.position = Vector2(-230, -170)
 	root.add_child(end_panel)
-	var lines: Array = ["[center][font_size=28][color=#ffd27a]Gorrak the Overseer is defeated[/color][/font_size][/center]",
+	var lines: Array = ["[center][font_size=28][color=#ffd27a]%s[/color][/font_size][/center]" % game.lv.victory_title(),
 		"[center]Time %d:%02d    Deaths %d[/center]" % [int(s.time) / 60, int(s.time) % 60, s.deaths], ""]
 	var dm: Array = []
 	for id in s.dmg:

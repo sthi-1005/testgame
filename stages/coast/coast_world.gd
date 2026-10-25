@@ -99,12 +99,14 @@ func _cell_kind(px: float, pz: float) -> int:
 	var k := cl.kind_of(floori((px + 0.1) / Level.T), floori((pz + 0.1) / Level.T))
 	return 2 if k == "cliff" else 1
 
-func _dist(mask: Callable) -> PackedFloat32Array:
+## Chamfer distance (m) to the nearest sample of a kind. mode 0: floor, 1: sea, 2: anything but sea.
+func _dist(mode: int) -> PackedFloat32Array:
 	var d := PackedFloat32Array()
 	d.resize(nx * nz)
-	for j in nz:
-		for i in nx:
-			d[_idx(i, j)] = 0.0 if mask.call(kinds[_idx(i, j)]) else 1e6
+	for k in nx * nz:
+		var kk := kinds[k]
+		var hit := kk == 0 if mode == 0 else (kk == 1 if mode == 1 else kk != 1)
+		d[k] = 0.0 if hit else 1e6
 	var s := STEP
 	var dg := STEP * 1.4142
 	for j in nz:
@@ -135,9 +137,9 @@ func _heights() -> void:
 	for j in nz:
 		for i in nx:
 			kinds[_idx(i, j)] = _cell_kind(x0 + i * STEP, z0 + j * STEP)
-	var d_floor := _dist(func(k): return k == 0)
-	var d_sea := _dist(func(k): return k == 1)
-	var d_land := _dist(func(k): return k != 1)
+	var d_floor := _dist(0)
+	var d_sea := _dist(1)
+	var d_land := _dist(2)
 	for j in nz:
 		for i in nx:
 			var px := x0 + i * STEP
@@ -231,20 +233,26 @@ func _terrain() -> void:
 	root.add_child(mi)
 	add_camera_collider(mi)
 
+## Terrain heights for the water shader, packed as 16 bits in RG8 over -24..24 m
+## (float textures don't filter on every WebGL2 device; the shader samples texels and blends itself).
 func height_texture() -> ImageTexture:
-	var img := Image.create(nx, nz, false, Image.FORMAT_RF)
-	for j in nz:
-		for i in nx:
-			img.set_pixel(i, j, Color(hts[_idx(i, j)], 0, 0))
+	var h := hts.duplicate()
 	# the plinths are separate meshes; add them so the water foams around them
 	for pl in CoastLevel.PLINTHS:
 		var c := Vector2(pl[0] * Level.T, pl[1] * Level.T)
 		var r: float = pl[2] + 1.2
 		for j in range(floori((c.y - r - z0) / STEP), ceili((c.y + r - z0) / STEP) + 1):
 			for i in range(floori((c.x - r - x0) / STEP), ceili((c.x + r - x0) / STEP) + 1):
-				if Vector2(x0 + i * STEP, z0 + j * STEP).distance_to(c) < r:
-					img.set_pixel(i, j, Color(maxf(img.get_pixel(i, j).r, 0.0 if Vector2(x0 + i * STEP, z0 + j * STEP).distance_to(c) > pl[2] else CoastLevel.PLINTH_TOP), 0, 0))
-	return ImageTexture.create_from_image(img)
+				var d := Vector2(x0 + i * STEP, z0 + j * STEP).distance_to(c)
+				if d < r:
+					h[_idx(i, j)] = maxf(h[_idx(i, j)], 0.0 if d > pl[2] else CoastLevel.PLINTH_TOP)
+	var data := PackedByteArray()
+	data.resize(nx * nz * 2)
+	for k in nx * nz:
+		var v := clampi(int(roundf((h[k] + 24.0) / 48.0 * 65535.0)), 0, 65535)
+		data[k * 2] = v >> 8
+		data[k * 2 + 1] = v & 255
+	return ImageTexture.create_from_image(Image.create_from_data(nx, nz, false, Image.FORMAT_RG8, data))
 
 # ------------------------------------------------------------------ water
 func _water() -> void:
@@ -294,7 +302,7 @@ func _water() -> void:
 	sanctum_water.mesh = disc
 	sanctum_water.position = Vector3(CoastLevel.SANCTUM_C.x * Level.T, CoastLevel.WATER_SANCTUM, CoastLevel.SANCTUM_C.y * Level.T)
 	sanctum_water.material_override = CoastLook.mat("water", { "height_tex": ht, "region": region, "level": CoastLevel.WATER_SANCTUM,
-		"wave_amp": 0.03, "deep": Color("#1f7f9e"), "mid": Color("#2aa3b8"), "shallow": Color("#5fd6d0"), "clear": 0.6, "foam_k": 0.7, "band_d": 0.14 })
+		"wave_amp": 0.03, "deep": Color("#17708f"), "mid": Color("#1f8fa6"), "shallow": Color("#36b3b3"), "clear": 0.82, "foam_k": 0.7, "band_d": 0.14 })
 	sanctum_water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	sanctum_water.name = "SanctumWater"
 	root.add_child(sanctum_water)
@@ -315,7 +323,7 @@ func _water() -> void:
 	pm.mesh = pools.commit()
 	pm.position.y = CoastLevel.WATER_POOL
 	pm.material_override = CoastLook.mat("water", { "height_tex": ht, "region": region, "level": CoastLevel.WATER_POOL,
-		"wave_amp": 0.0, "mid": Color("#38b6c4"), "shallow": Color("#6fdcd4"), "clear": 0.5, "foam_k": 0.6, "band_d": 0.12 })
+		"wave_amp": 0.0, "mid": Color("#2a9fb0"), "shallow": Color("#45bdb8"), "clear": 0.5, "foam_k": 0.6, "band_d": 0.12 })
 	pm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	pm.name = "Pools"
 	root.add_child(pm)

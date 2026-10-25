@@ -167,10 +167,8 @@ func _dress_coast() -> void:
 	_prop("p_WeaponStand", camp + Vector3(-4.0, 0, 0.5), PI / 2, 1.6, 0.6)
 	_put("flag", camp + Vector3(1.0, 0, -6.5), 0.0, 1.0, { "color": Color("#e2574c") })
 	_ob(camp + Vector3(1.0, 0, -6.5), 0.3)
-	# wrecked hull on the north shore of the strand
-	_put("wreck", W(31, 25) + Vector3(0, 0, -3.5), -0.5, 1.0)
-	_ob(W(31, 25) + Vector3(-1.5, 0, -2.0), 2.2)
-	_ob(W(31, 25) + Vector3(2.5, 0, -1.0), 1.8)
+	# a wrecked hull beached on the lagoon shore, north of the strand
+	_put("wreck", W(18, 24) + Vector3(0, 0, 0.5), -0.4, 1.0)
 	# beach rocks and shells
 	for p in [[14, 26], [36, 26], [20, 34], [11, 31], [30, 31]]:
 		_rock(W(p[0], p[1]) + Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)), rng.randf_range(2.4, 3.6))
@@ -300,6 +298,13 @@ func intro_text() -> String:
 ## open sky: the camera never meets a ceiling
 func zone_h(_zone: String) -> float:
 	return 80.0
+
+func victory_title() -> String:
+	return "Ondrak the Brinewarden is defeated"
+
+func loot_lines() -> Array:
+	return ["You lift the lid of the Brinewarden's coffer: a Tidecrown Circlet, a Pearl of Still Water and 22 silver.",
+		"Loot: Tidecrown Circlet, Pearl of Still Water, 22 silver"]
 
 func cart_starts() -> Array:
 	return []
