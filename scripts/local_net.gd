@@ -17,9 +17,10 @@ var sim: Sim
 var acc := 0.0
 var detail_t := 0.0
 var bot: Bot # autoplay (tests and demos)
+var stage := Stages.DEFAULT # set before host_solo
 
 func host_solo(cls: String) -> void:
-	sim = Sim.new(Level.new())
+	sim = Sim.new(Stages.make_level(stage))
 	sim.start([[PEER, cls]])
 	sim.events.clear() # the world state below already carries every spawn
 	world_received.emit(sim.world_state())

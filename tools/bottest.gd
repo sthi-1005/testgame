@@ -1,13 +1,14 @@
 extends SceneTree
 ## Headless balance test: a bot plays the whole slice as one class with two AI party members.
-## godot --headless -s tools/bottest.gd -- <class> [seconds] [nododge]
+## godot --headless -s tools/bottest.gd -- <class> [seconds] [nododge] [--stage id]
 
 func _init() -> void:
 	var args := OS.get_cmdline_user_args()
 	var cls: String = args[0] if args.size() > 0 else "sellsword"
 	var limit: float = float(args[1]) if args.size() > 1 else 500.0
 	seed(int(args[3]) if args.size() > 3 else 7)
-	var sim := Sim.new(Level.new())
+	var si := args.find("--stage")
+	var sim := Sim.new(Stages.make_level(args[si + 1] if si >= 0 else Stages.DEFAULT))
 	sim.start([[2, cls]])
 	var bot := Bot.new(sim, sim.players[2])
 	bot.dodge = not args.has("nododge")

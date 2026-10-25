@@ -30,18 +30,21 @@ var carts: Array = [] # { x, z, vx, hit, obst }
 var bell_swing := 0.0
 var once := {}
 var checkpoint := Vector3.ZERO
+var checkpoint_i := -1 # index into lv.checkpoints() of the furthest one reached
 var loot_open := false
 var stats := { "dmg": {}, "heal": {}, "deaths": 0, "start": 0.0 }
+var boss_scripts := {} # boss id -> stage boss script (stages/boss_script.gd); Gorrak has none
+var stage_vals := [0.0, 0.0, 0.0] # snapshot header slots 2-4 for stages without carts: free for set pieces
 
 func _init(level: Level) -> void:
 	lv = level
-	checkpoint = Level.W(3.5, 24.5)
+	checkpoint = lv.start_point()
 
 # ------------------------------------------------------------------ setup
 func start(roster: Array) -> void:
 	## roster: [[peer, class], ...] for the human players
 	state = "play"
-	for s in D.SPAWNS:
+	for s in lv.spawns():
 		spawn_enemy(s[0], s[1], s[2], s[3], s[4])
 	var taken := {}
 	var i := 0
@@ -60,10 +63,10 @@ func start(roster: Array) -> void:
 		carts.append({ "x": p.x, "z": p.z, "vx": 0.0, "hit": false, "obst": o })
 	stats.start = game_time
 	ev(["state", "play"])
-	chat("The air in the shaft is cold and smells of lamp oil.", "sys")
+	chat(lv.intro_text(), "sys")
 
 func _start_spot(i: int) -> Vector3:
-	var spots := [Vector2(3.6, 24.6), Vector2(4.4, 25.2), Vector2(3.2, 25.4), Vector2(4.2, 24.0), Vector2(3.6, 25.9)]
+	var spots := lv.start_spots()
 	var s: Vector2 = spots[i % spots.size()]
 	return Vector3(s.x * Level.T, 0, s.y * Level.T)
 
@@ -80,7 +83,7 @@ func spawn_info(u: SUnit) -> Dictionary:
 		"boss": u.boss, "summon": u.summon, "r": u.r, "fly": u.fly, "peer": u.peer, "max_hp": u.max_hp, "res_type": u.res_type }
 
 func spawn_enemy(type: String, cx: float, cz: float, pack: String, yaw := 0.0) -> SUnit:
-	var d: Dictionary = D.ENEMIES[type]
+	var d := lv.enemy_def(type)
 	var u := _new_unit()
 	u.team = "enemy"
 	u.kind = type
@@ -103,8 +106,7 @@ func spawn_enemy(type: String, cx: float, cz: float, pack: String, yaw := 0.0) -
 	u.elite = d.get("elite", false)
 	u.summon = d.get("summon", false)
 	u.aggro_r = d.get("aggro", 11.0)
-	if type == "bat":
-		u.fly = 2.4
+	u.fly = d.get("fly", 2.4 if type == "bat" else 0.0)
 	enemies.append(u)
 	ev(["spawn", spawn_info(u)])
 	return u
@@ -853,7 +855,7 @@ func update_enemy(e: SUnit, dt: float) -> void:
 		# kited out of the arena: evade and reset after a few seconds
 		var any_in := false
 		for p in party:
-			if p.alive() and lv.zone_at(p.pos.x, p.pos.z) in ["hall", "gate"]:
+			if p.alive() and lv.zone_at(p.pos.x, p.pos.z) in lv.arena_zones:
 				any_in = true
 		e.bs.out_t = 0.0 if any_in else e.bs.get("out_t", 0.0) + dt
 		if e.bs.out_t > 8.0:
@@ -871,7 +873,7 @@ func update_enemy(e: SUnit, dt: float) -> void:
 	if d > D.MELEE * 0.8:
 		var before := e.pos
 		steer(e, t.pos, dt, 1.0, e.r + t.r + D.MELEE * 0.6)
-		if e.boss != "" and lv.zone_at(e.pos.x, e.pos.z) != "hall":
+		if e.boss != "" and not lv.zone_at(e.pos.x, e.pos.z) in lv.arena_zones:
 			e.pos = before # bosses never leave their arena
 			e.moving = false
 		anim_loco(e, "run" if e.moving else "idle")
@@ -881,10 +883,14 @@ func update_enemy(e: SUnit, dt: float) -> void:
 		anim_loco(e, "idle")
 
 func _evade_boss(e: SUnit) -> void:
-	yell(e, "Gorrak not chase. Gorrak WAIT.")
-	emote("Gorrak stomps back to his post.")
+	var bsc = _boss_script(e)
+	if bsc:
+		bsc.evade(e)
+	else:
+		yell(e, "Gorrak not chase. Gorrak WAIT.")
+		emote("Gorrak stomps back to his post.")
 	for b in enemies.duplicate():
-		if b.kind == "bat":
+		if b.summon:
 			remove_unit(b)
 	clear_teles()
 	reset_enemy(e)
@@ -1221,13 +1227,29 @@ func update_charge(u: SUnit, dt: float) -> bool:
 	return true
 
 # ------------------------------------------------------------------ bosses
+## The stage's script for this boss, or null for Gorrak (built in below).
+func _boss_script(e: SUnit) -> Object:
+	if e.boss == "gorrak":
+		return null
+	if not boss_scripts.has(e.boss):
+		boss_scripts[e.boss] = lv.boss_script(e.boss, self)
+	return boss_scripts[e.boss]
+
 func start_boss(e: SUnit) -> void:
 	active_boss = e
 	ev(["boss", "show", e.id])
-	gorrak_pull(e)
+	var bsc = _boss_script(e)
+	if bsc:
+		bsc.pull(e)
+	else:
+		gorrak_pull(e)
 
 func boss_death(e: SUnit) -> void:
-	gorrak_death(e)
+	var bsc = _boss_script(e)
+	if bsc:
+		bsc.death(e)
+	else:
+		gorrak_death(e)
 	active_boss = null
 	ev(["boss", "hide", e.id])
 	clear_teles()
@@ -1237,7 +1259,18 @@ func set_phase(e: SUnit, label: String) -> void:
 	ev(["boss", "phase", e.id, label])
 
 func boss_update(e: SUnit, dt: float) -> bool:
+	var bsc = _boss_script(e)
+	if bsc:
+		return bsc.update(e, dt)
 	return gorrak_update(e, dt)
+
+## The last boss is down: drop the strongbox, then show the victory screen.
+func win_run(e: SUnit) -> void:
+	later(1.2, func(): ev(["chest", e.pos, e.yaw + PI]))
+	later(4.0, func():
+		state = "victory"
+		var secs: float = game_time - stats.start
+		ev(["state", "victory", { "time": secs, "deaths": stats.deaths, "dmg": stats.dmg, "heal": stats.heal }]))
 
 func gorrak_pull(e: SUnit) -> void:
 	yell(e, "Gorrak smash little thieves!")
@@ -1431,11 +1464,7 @@ func gorrak_death(e: SUnit) -> void:
 		if s == null:
 			s = ai_of("mage")
 		say(s, "One down. Something big is moving behind that rubble."))
-	later(1.2, func(): ev(["chest", e.pos, e.yaw + PI]))
-	later(4.0, func():
-		state = "victory"
-		var secs: float = game_time - stats.start
-		ev(["state", "victory", { "time": secs, "deaths": stats.deaths, "dmg": stats.dmg, "heal": stats.heal }]))
+	win_run(e)
 
 func update_carts(dt: float) -> void:
 	for c in carts:
@@ -1553,14 +1582,16 @@ func step(dt: float) -> void:
 	update_projs(dt)
 	update_carts(dt)
 	bell_swing = maxf(0, bell_swing - dt * 0.35)
+	lv.tick(self, dt)
 	# checkpoint: the furthest safe spot the party has reached
 	var leader := leader_unit()
 	if leader and leader.alive() and not in_combat:
 		var z := lv.zone_at(leader.pos.x, leader.pos.z)
-		if z == "sorting" and checkpoint.x < 15 * Level.T:
-			checkpoint = Level.W(15.5, 9.5)
-		elif z == "hall" and checkpoint.x < 23 * Level.T:
-			checkpoint = Level.W(22, 9.5)
+		var cps := lv.checkpoints()
+		for k in range(checkpoint_i + 1, cps.size()):
+			if cps[k][0] == z:
+				checkpoint_i = k
+				checkpoint = cps[k][1]
 	var was := in_combat
 	in_combat = engaged_enemies().size() > 0
 	if in_combat:
@@ -1601,7 +1632,7 @@ func _recover() -> void:
 	projs.clear()
 	timers.clear()
 	for e in enemies.duplicate():
-		if e.kind == "bat":
+		if e.summon:
 			remove_unit(e)
 			continue
 		if e.alive():
@@ -1640,9 +1671,9 @@ func snapshot() -> PackedFloat32Array:
 	s.resize(6 + units.size() * SNAP_STRIDE)
 	s[0] = game_time
 	s[1] = units.size()
-	s[2] = carts[0].x if carts.size() > 0 else 0.0
-	s[3] = carts[1].x if carts.size() > 1 else 0.0
-	s[4] = bell_swing
+	s[2] = carts[0].x if carts.size() > 0 else stage_vals[0]
+	s[3] = carts[1].x if carts.size() > 1 else stage_vals[1]
+	s[4] = bell_swing if carts.size() > 0 else stage_vals[2]
 	s[5] = 1.0 if in_combat else 0.0
 	var ab_ids := D.ability_ids()
 	var i := 6
@@ -1700,5 +1731,5 @@ func world_state() -> Dictionary:
 	var sp: Array = []
 	for u in units:
 		sp.append(spawn_info(u))
-	return { "spawns": sp, "state": state, "boss": active_boss.id if active_boss else 0,
+	return { "stage": lv.stage_id, "spawns": sp, "state": state, "boss": active_boss.id if active_boss else 0,
 		"phase": active_boss.bs.get("phase", "") if active_boss else "", "loot": loot_open }
