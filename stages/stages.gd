@@ -13,6 +13,8 @@ const LIST := [
 		"level": "res://scripts/level.gd", "world": "res://scripts/world_builder.gd" },
 	{ "id": "skytemple", "name": "Skyroot Spire", "blurb": "Climb a giant tree through the canopy to a temple in the open sky. Hollowbark waits at the top.",
 		"level": "res://stages/skytemple/sky_level.gd", "world": "res://stages/skytemple/sky_builder.gd" },
+	{ "id": "larkspur", "name": "Larkspur Vale", "blurb": "An open valley under a big sky. Cross the river, clear the brigands, storm the hill keep.",
+		"level": "res://stages/larkspur/larkspur_level.gd", "world": "res://stages/larkspur/larkspur_world.gd" },
 ]
 
 static func info(id: String) -> Dictionary:
