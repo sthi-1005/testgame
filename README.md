@@ -9,6 +9,13 @@ Diggings, Sorting Cave, Overseer's Hall, boss Gorrak) and a bot clears it with e
 
 Engine: Godot 4.7 (standard build, GDScript only, Compatibility renderer so the web export matches).
 
+## Play
+
+Open the project in Godot 4.7 and press F5, or run `godot --path .`. Pick a class and choose Play solo; AI companions fill the party.
+
+Controls: WASD to move (A/D turn, or strafe while holding the right mouse button), right-drag to steer, left-drag to look around, wheel to zoom.
+Click a unit to target it, right-click an enemy to attack, Tab for the next enemy, F1-F5 for party members, 1-5 for abilities, 6 or R for a potion, F to loot.
+
 ## Layout
 
 | Path | What |
@@ -19,6 +26,7 @@ Engine: Godot 4.7 (standard build, GDScript only, Compatibility renderer so the 
 | `scripts/sim.gd` (`Sim`) | The authoritative simulation: combat, abilities, enemy and party AI, the Gorrak fight. Server only. |
 | `scripts/bot.gd` (`Bot`) | Drives a party member through the slice (tests, `--bot`). |
 | `scripts/look.gd`, `assets.gd`, `world_builder.gd`, `cave.gd`, `unit_view.gd` | Client visuals: toon shading, model loading and animation retargeting, the dungeon, unit views. |
+| `main.tscn`, `scripts/main.gd`, `game.gd`, `hud.gd`, `cursors.gd`, `local_net.gd` | Title screen, the client game scene (camera, controls, effects), the HUD, context cursors, and the in-process server used for solo play. |
 | `tools/` | Headless tests and render scripts (see below). |
 | `assets/` | CC0 models: KayKit (Kay Lousberg) and Quaternius. |
 

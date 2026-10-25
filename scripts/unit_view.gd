@@ -12,6 +12,7 @@ var shadow: MeshInstance3D
 var ward: MeshInstance3D
 var ring: MeshInstance3D
 var staff_gem: Node3D
+var hover_ring: MeshInstance3D
 
 # latest replicated state
 var hp := 1.0
@@ -58,7 +59,7 @@ func setup(i: Dictionary) -> void:
 	# blob shadow
 	shadow = MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	var s: float = i.r * 2.6 * (0.8 if fly > 0 else 1.0)
+	var s: float = i.r * 2.6 * Assets.CHAR_SCALE * (0.8 if fly > 0 else 1.0)
 	pm.size = Vector2(s, s)
 	shadow.mesh = pm
 	shadow.material_override = _blob_mat()
@@ -67,15 +68,13 @@ func setup(i: Dictionary) -> void:
 	# nameplate for enemies, name only for party
 	plate = Label3D.new()
 	plate.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	plate.no_depth_test = true
+	plate.no_depth_test = false
 	plate.fixed_size = true
 	plate.pixel_size = 0.0011
 	plate.font_size = 18
 	plate.outline_size = 6
 	plate.outline_modulate = Color(0, 0, 0, 0.9)
-	var h: float = 2.6 * Assets.BODIES[i.body].get("scale", 1.0)
-	if i.body == "gorrak":
-		h = 4.4
+	var h := height() + 0.2
 	plate.position.y = h + fly + 0.5
 	plate.text = i.name
 	plate.modulate = Color(1, 0.45, 0.35) if i.team == "enemy" else Color(0.55, 0.85, 1)
@@ -95,8 +94,8 @@ static func _blob_mat() -> StandardMaterial3D:
 
 func height() -> float:
 	if info.body == "gorrak":
-		return 4.0
-	return 2.4 * Assets.BODIES[info.body].get("scale", 1.0)
+		return 4.0 * Assets.CHAR_SCALE
+	return 2.4 * Assets.BODIES[info.body].get("scale", 1.0) * Assets.CHAR_SCALE
 
 func chest() -> Vector3:
 	return global_position + Vector3(0, height() * 0.55 + (fly if not dead else 0.0), 0)
@@ -176,17 +175,17 @@ func apply(s: PackedFloat32Array, i: int, t: float, is_me: bool) -> void:
 	if warded and ward == null:
 		ward = MeshInstance3D.new()
 		var sm := SphereMesh.new()
-		sm.radius = 1.6
-		sm.height = 3.2
+		sm.radius = 1.25 * Assets.CHAR_SCALE
+		sm.height = 2.5 * Assets.CHAR_SCALE
 		ward.mesh = sm
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		m.albedo_color = Color(1, 0.85, 0.45, 0.12)
+		m.albedo_color = Color(1, 0.85, 0.45, 0.05)
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		ward.material_override = m
-		ward.position.y = 1.3
+		ward.position.y = 1.3 * Assets.CHAR_SCALE
 		add_child(ward)
 	elif not warded and ward:
 		ward.queue_free()
@@ -226,7 +225,7 @@ func set_targeted(on: bool, hostile: bool) -> void:
 	if on and ring == null:
 		ring = MeshInstance3D.new()
 		var tm := TorusMesh.new()
-		var r: float = info.r * 1.3
+		var r: float = info.r * 1.3 * Assets.CHAR_SCALE
 		tm.inner_radius = r
 		tm.outer_radius = r + 0.12
 		tm.rings = 24
@@ -245,3 +244,27 @@ func set_targeted(on: bool, hostile: bool) -> void:
 		ring = null
 	if plate and is_enemy():
 		plate.visible = not dead
+
+## A soft ring and a visible nameplate while the cursor is over this unit.
+func set_hover(on: bool) -> void:
+	if on and hover_ring == null:
+		hover_ring = MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		var r: float = info.r * 1.35 * Assets.CHAR_SCALE
+		tm.inner_radius = r
+		tm.outer_radius = r + 0.09
+		tm.rings = 24
+		tm.ring_segments = 4
+		hover_ring.mesh = tm
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color = Color(1, 0.55, 0.4, 0.55) if is_enemy() else Color(0.6, 1, 0.65, 0.55)
+		m.disable_fog = true
+		hover_ring.material_override = m
+		hover_ring.position.y = 0.08
+		hover_ring.scale.y = 0.1
+		add_child(hover_ring)
+	elif not on and hover_ring:
+		hover_ring.queue_free()
+		hover_ring = null
