@@ -39,7 +39,7 @@ func wall(st: SurfaceTool, a: Vector3, b: Vector3, inward: Vector3, h: float) ->
 		for i in nu + 1:
 			var p := a2 + along * ((length + 1.2) * i / nu) + Vector3.UP * (-0.3 + (h + 1.0) * j / nv)
 			# lean the upper wall inward a bit so tunnels read as carved, not built
-			var lean := clampf((p.y - 4.0) / 6.0, 0.0, 1.0)
+			var lean := clampf((p.y - 6.0) / 6.0, 0.0, 1.0)
 			p += inward * lean * lean * 1.4
 			row.append(p + disp(p, inward))
 		grid.append(row)

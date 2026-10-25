@@ -11,7 +11,7 @@ const QUAT_ALIAS := { "idle": "Idle", "combatIdle": "Idle", "run": "Run", "walk"
 const BAT_ALIAS := { "idle": "Bat_Flying", "combatIdle": "Bat_Flying", "run": "Bat_Flying", "walk": "Bat_Flying", "back": "Bat_Flying",
 	"attack": "Bat_Attack", "attack2": "Bat_Attack2", "hit": "Bat_Hit", "death": "Bat_Death" }
 ## Characters are drawn larger than the sim's collision circles so they hold their own in the 4 m tunnels.
-const CHAR_SCALE := 1.3
+const CHAR_SCALE := 1.0
 const LOOPING := ["idle", "combatIdle", "run", "walk", "back", "cast"]
 
 # Animation clips for the KayKit rig, retargeted onto every KayKit character.
@@ -33,6 +33,12 @@ const BODIES := {
 	"gorrak": { "model": "res://assets/chars/orc_brute.glb", "alias": QUAT_ALIAS, "scale": 1.75 },
 	"bat": { "model": "res://assets/chars/bat.glb", "alias": BAT_ALIAS, "scale": 0.42 },
 }
+
+## Bodies a stage adds at runtime (tinted variants, its own bosses), merged in from the stage's Level._configure().
+static var extra_bodies := {}
+
+static func body_def(name: String) -> Dictionary:
+	return extra_bodies[name] if extra_bodies.has(name) else BODIES[name]
 
 static var _scenes := {}
 static var _libs := {} # body -> AnimationLibrary
@@ -85,7 +91,7 @@ static func skeleton_of(root: Node) -> Skeleton3D:
 static func library_for(body: String, model: Node) -> AnimationLibrary:
 	if _libs.has(body):
 		return _libs[body]
-	var def: Dictionary = BODIES[body]
+	var def: Dictionary = body_def(body)
 	var lib := AnimationLibrary.new()
 	var sk := skeleton_of(model)
 	var alias: Dictionary = def.alias
@@ -187,7 +193,7 @@ static func make_staff() -> Node3D:
 
 ## Build a character: the model, its gear on the hand bones and an AnimationPlayer with its clips.
 static func character(body: String) -> Dictionary:
-	var def: Dictionary = BODIES[body]
+	var def: Dictionary = body_def(body)
 	var model := scene(def.model).instantiate() as Node3D
 	var lib := library_for(body, model)
 	for old in model.find_children("*", "AnimationPlayer", true, false):

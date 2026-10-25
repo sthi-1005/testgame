@@ -95,7 +95,7 @@ static func _blob_mat() -> StandardMaterial3D:
 func height() -> float:
 	if info.body == "gorrak":
 		return 4.0 * Assets.CHAR_SCALE
-	return 2.4 * Assets.BODIES[info.body].get("scale", 1.0) * Assets.CHAR_SCALE
+	return 2.4 * Assets.body_def(info.body).get("scale", 1.0) * Assets.CHAR_SCALE
 
 func chest() -> Vector3:
 	return global_position + Vector3(0, height() * 0.55 + (fly if not dead else 0.0), 0)

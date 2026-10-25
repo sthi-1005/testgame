@@ -52,11 +52,11 @@ func _configure() -> void:
 
 ## Carve the walkable cells and place obstacles and decor.
 func _layout() -> void:
-	carve(3, 15, 4, 26, "mouth")
+	carve(2, 15, 4, 26, "mouth")
 	carve(1, 7, 9, 14, "diggings")
-	carve(10, 10, 14, 11, "cut")
-	carve(15, 6, 19, 13, "sorting")
-	carve(20, 9, 22, 10, "cut2")
+	carve(10, 9, 14, 11, "cut")
+	carve(15, 5, 20, 14, "sorting")
+	carve(21, 8, 22, 10, "cut2")
 	carve(23, 2, 33, 15, "hall")
 	carve(27, 0, 29, 1, "gate")
 	_build_structure()
@@ -64,6 +64,9 @@ func _layout() -> void:
 
 # ------------------------------------------------------------------ stage hooks (override per stage)
 ## Ground height under a point. Visual only: collision and the sim stay 2D on the grid.
+## Camera far plane for this stage (open stages with long views raise it).
+var cam_far := 300.0
+
 func floor_y(_x: float, _z: float) -> float:
 	return 0.0
 
@@ -125,7 +128,7 @@ func zone_at(wx: float, wz: float) -> String:
 	return zone_of[z * gw + x]
 
 func zone_h(zone: String) -> float:
-	return ZONE_H.get(zone, 8.0)
+	return ZONE_H.get(zone, 11.0)
 
 func ceil_at(wx: float, wz: float) -> float:
 	return zone_h(zone_at(wx, wz))
@@ -331,7 +334,7 @@ func _build_structure() -> void:
 			_add("prop", "dungeon-pillar", p, 0.0, Vector3(1.15, ph / 4.0 + 0.05, 1.15))
 			obst.append([p.x, p.z, 0.75])
 
-func _wall_torch(cx: int, cz: int, side: String, h := 3.2) -> void:
+func _wall_torch(cx: int, cz: int, side: String, h := 3.0) -> void:
 	var s: Array = { "n": [0, -1, PI], "s": [0, 1, 0.0], "e": [1, 0, -PI / 2], "w": [-1, 0, PI / 2] }[side]
 	var c := W(cx, cz)
 	var p := Vector3(c.x + s[0] * (T / 2), h, c.z + s[1] * (T / 2))
@@ -343,9 +346,9 @@ func _support_frame(cx: float, cz: float, along_x: bool, span := 2 * T) -> void:
 	var half := span / 2 - 0.4
 	for s in [-1, 1]:
 		var p := Vector3(c.x, 0, c.z + s * half) if along_x else Vector3(c.x + s * half, 0, c.z)
-		_add("timber", "", p + Vector3(0, 3, 0), rng.randf_range(-0.04, 0.04), Vector3(0.55, 6, 0.55))
+		_add("timber", "", p + Vector3(0, 3.4, 0), rng.randf_range(-0.04, 0.04), Vector3(0.6, 6.8, 0.6))
 		obst.append([p.x, p.z, 0.45])
-	_add("timber", "", c + Vector3(0, 6.2, 0), 0.0, Vector3(0.6, 0.6, span + 0.4) if along_x else Vector3(span + 0.4, 0.6, 0.6))
+	_add("timber", "", c + Vector3(0, 6.9, 0), 0.0, Vector3(0.65, 0.65, span + 0.4) if along_x else Vector3(span + 0.4, 0.65, 0.65))
 
 func _prop_obst(m: String, p: Vector3, rot: float, s, r: float) -> void:
 	_add("prop", m, p, rot, s)
@@ -355,14 +358,14 @@ func _prop_obst(m: String, p: Vector3, rot: float, s, r: float) -> void:
 func _decorate() -> void:
 	# entrance tunnel: timber frames and daylight spilling in from the mouth
 	for z in range(16, 26, 2):
-		_support_frame(3.5, z, false)
-	_add("daylight", "", Vector3(4 * T, 4, 27.5 * T))
-	_add("light", "", Vector3(4 * T, 6, 26 * T), 0.0, 1.0, { "color": Color(0.6, 0.75, 1), "range": 34.0, "energy": 2.2 })
-	_add("light", "", Vector3(4 * T, 4, 22 * T), 0.0, 1.0, { "color": Color(0.55, 0.68, 0.9), "range": 22.0, "energy": 0.8 })
-	_wall_torch(3, 18, "w")
+		_support_frame(3.0, z, false, 3 * T)
+	_add("daylight", "", Vector3(3.5 * T, 4, 27.5 * T))
+	_add("light", "", Vector3(3.5 * T, 6, 26 * T), 0.0, 1.0, { "color": Color(0.6, 0.75, 1), "range": 34.0, "energy": 2.2 })
+	_add("light", "", Vector3(3.5 * T, 4, 22 * T), 0.0, 1.0, { "color": Color(0.55, 0.68, 0.9), "range": 22.0, "energy": 0.8 })
+	_wall_torch(2, 18, "w")
 	_wall_torch(4, 22, "e")
 	_prop_obst("p_Barrel", W(4, 24) + Vector3(1.3, 0, 0), 0.3, 1.7, 0.8)
-	_prop_obst("p_Crate_Wooden", W(3, 23) + Vector3(-1.2, 0, 0.5), 0.5, 1.7, 0.9)
+	_prop_obst("p_Crate_Wooden", W(2, 23) + Vector3(-0.8, 0, 0.5), 0.5, 1.7, 0.9)
 
 	# lower diggings: ore heaps, timber, lanterns
 	for t in [[1, 9, "w"], [9, 8, "e"], [5, 7, "n"], [2, 14, "s"], [8, 13, "e"]]:
@@ -375,20 +378,20 @@ func _decorate() -> void:
 	_prop_obst("p_Bucket_Wooden_1", W(3, 13) + Vector3(-1.2, 0, 1), 0.0, 1.7, 0)
 	_prop_obst("p_Rope_1", W(6, 13), 0.4, 1.8, 0)
 	for x in [10.5, 12.5, 14.5]:
-		_support_frame(x, 10.5, true)
+		_support_frame(x, 10.0, true, 3 * T)
 	for q in [[3, 9], [7, 12]]:
 		_prop_obst("dungeon-pillar", W(q[0], q[1]), 0.4, Vector3(0.7, 2, 0.7), 0.6)
 
 	# sorting cave: crates and barrels of ore, a workbench
-	for t in [[15, 7, "w"], [19, 12, "e"], [17, 6, "n"], [16, 13, "s"]]:
+	for t in [[15, 7, "w"], [20, 12, "e"], [17, 5, "n"], [16, 14, "s"]]:
 		_wall_torch(t[0], t[1], t[2])
 	for s in [[15, 6, "p_Crate_Wooden", 1.8, 0.0], [15, 6, "p_Crate_Wooden", 1.8, 1.3], [19, 6, "p_Barrel", 1.8, 0.0], [19, 7, "p_Barrel", 1.8, 0.0],
 			[15, 13, "p_Crate_Metal", 1.6, 0.0], [19, 13, "p_Workbench", 1.7, 0.0], [18, 13, "p_Barrel_Holder", 1.7, 0.0]]:
 		var ox := -0.8 if s[0] == 15 else (0.8 if s[0] == 19 else 0.0)
 		var p := W(s[0], s[1]) + Vector3(ox, s[4], -0.8 if s[1] == 6 else 0.8)
 		_prop_obst(s[2], p, rng.randf_range(-0.3, 0.3), s[3], 0.0 if s[4] > 0 else 1.1)
-	_support_frame(20.5, 9.5, true)
-	_support_frame(21.8, 9.5, true)
+	_support_frame(21.0, 9.0, true, 3 * T)
+	_support_frame(22.3, 9.0, true, 3 * T)
 
 	# overseer's hall: rails, carts, the shift bell, braziers
 	for t in [[23, 3, "w"], [23, 8, "w"], [23, 13, "w"], [33, 4, "e"], [33, 9, "e"], [33, 14, "e"], [25, 2, "n"], [31, 2, "n"], [26, 15, "s"], [31, 15, "s"]]:

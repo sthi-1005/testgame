@@ -4,8 +4,8 @@ extends Node3D
 ## and turns input into requests. Talks to a net object (LocalNet for solo, the network layer otherwise).
 
 const INTERP_DELAY := 0.1
-const CAM_MIN := 3.0
-const CAM_MAX := 20.0
+const CAM_MIN := 2.5
+const CAM_MAX := 22.0
 
 var net: Node
 var stage_id := Stages.DEFAULT # set before the node enters the tree; a world from the server can switch it
@@ -40,9 +40,9 @@ var render_t := -1.0
 
 # camera
 var cam_yaw := PI
-var cam_pitch := -0.42
-var cam_dist := 11.0
-var cam_cur_dist := 11.0
+var cam_pitch := -0.28
+var cam_dist := 9.0 # zoom target (the wheel and pinch set this)
+var cam_cur_dist := 9.0
 var shake_amt := 0.0
 var lmb := false
 var rmb := false
@@ -61,8 +61,8 @@ func _ready() -> void:
 	add_child(we)
 	_build_world()
 	cam = Camera3D.new()
-	cam.fov = 58
-	cam.far = 300
+	cam.fov = 60
+	cam.far = lv.cam_far
 	cam.current = true
 	add_child(cam)
 	dust = WorldBuilder.dust_motes()
@@ -303,6 +303,7 @@ func _physics_process(delta: float) -> void:
 	var stick := can_move and touch_move.length() > 0.15
 	var was_moving := moving
 	moving = fwd != 0 or side != 0 or stick
+	_fwd_input = fwd
 	if moving:
 		var f := Vector3(sin(my_yaw), 0, cos(my_yaw))
 		var r := Vector3(-f.z, 0, f.x)
@@ -325,7 +326,7 @@ func _physics_process(delta: float) -> void:
 ## Touch camera drag (same feel as a mouse drag).
 func touch_look(rel: Vector2) -> void:
 	cam_yaw -= rel.x * 0.006
-	cam_pitch = clampf(cam_pitch - rel.y * 0.005, -1.2, 0.35)
+	cam_pitch = clampf(cam_pitch - rel.y * 0.005, -1.25, 0.45)
 
 func _key(k: Key) -> bool:
 	return Input.is_physical_key_pressed(k)
@@ -357,7 +358,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		var mm := e as InputEventMouseMotion
 		drag += mm.relative.length()
 		cam_yaw -= mm.relative.x * 0.006
-		cam_pitch = clampf(cam_pitch - mm.relative.y * 0.005, -1.2, 0.35)
+		cam_pitch = clampf(cam_pitch - mm.relative.y * 0.005, -1.25, 0.45)
 		if rmb and me and not me.dead and me.flags & 32 == 0:
 			my_yaw = cam_yaw
 	elif e is InputEventKey and e.pressed and not e.echo:
@@ -518,47 +519,48 @@ func party_views() -> Array:
 	return out
 
 # ------------------------------------------------------------------ camera
+## WoW-style: an eye-height pivot, the camera swings in behind you as you run, and a swept sphere
+## against the camera collision layer pulls it in when rock gets in the way (and eases it back out).
 func _update_camera(delta: float) -> void:
-	if not lmb and not rmb and touch_move == Vector2.ZERO and (moving or follow_server):
-		cam_yaw = lerp_angle(cam_yaw, my_yaw, clampf(delta * (1.5 if follow_server else 3.0), 0, 1))
-	var pivot := ground(my_pos) + Vector3(0, 2.2 * Assets.CHAR_SCALE, 0)
-	var ceil := lv.ceil_at(my_pos.x, my_pos.z) + lv.floor_y(my_pos.x, my_pos.z) - 2.4
-	# in tight tunnels, swing higher overhead before pulling in close
-	var best_d := -1.0
-	var best_dir := Vector3.ZERO
-	for pitch in [cam_pitch, minf(cam_pitch, -0.75), minf(cam_pitch, -1.0), -1.25]:
-		var dir := Vector3(-sin(cam_yaw) * cos(pitch), -sin(pitch), -cos(cam_yaw) * cos(pitch))
-		var allowed := _cam_room(pivot, dir, ceil)
-		if allowed > best_d + 0.5:
-			best_d = allowed
-			best_dir = dir
-		if allowed >= minf(cam_dist, 6.0):
-			break
-	cam_cur_dist = best_d if best_d < cam_cur_dist else move_toward(cam_cur_dist, best_d, delta * 6.0)
-	cam_dir = cam_dir.slerp(best_dir, clampf(delta * 6.0, 0, 1)) if cam_dir != Vector3.ZERO else best_dir
-	var pos := pivot + cam_dir.normalized() * cam_cur_dist
-	if pos.y > ceil:
-		pos.y = maxf(ceil, pivot.y + 0.3) # flatten under a low roof rather than zooming in
+	var steering := lmb or rmb or touch_move != Vector2.ZERO
+	if not steering and ((moving and _fwd_input >= 0) or follow_server):
+		cam_yaw = lerp_angle(cam_yaw, my_yaw, clampf(delta * (1.5 if follow_server else 3.5), 0, 1))
+	var want_pivot := ground(my_pos) + Vector3(0, PIVOT_H, 0)
+	cam_pivot = want_pivot if cam_pivot == Vector3.INF else cam_pivot.lerp(want_pivot, clampf(delta * 14.0, 0, 1))
+	cam_zoom = move_toward(cam_zoom, cam_dist, delta * maxf(6.0, absf(cam_dist - cam_zoom) * 6.0))
+	var dir := Vector3(-sin(cam_yaw) * cos(cam_pitch), -sin(cam_pitch), -cos(cam_yaw) * cos(cam_pitch))
+	var allowed := _cam_sweep(cam_pivot, dir, cam_zoom)
+	cam_cur_dist = allowed if allowed < cam_cur_dist else move_toward(cam_cur_dist, allowed, delta * 5.0)
+	var pos := cam_pivot + dir * cam_cur_dist
 	if shake_amt > 0:
 		pos += Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * shake_amt * 0.25
 		shake_amt = maxf(0.0, shake_amt - delta * 2.5)
-	cam.look_at_from_position(pos, pivot + Vector3(0, 0.2, 0))
+	cam.look_at_from_position(pos, cam_pivot + Vector3(0, 0.15, 0))
 	if me:
-		me.model.visible = cam_cur_dist > 1.8
+		me.model.visible = cam_cur_dist > 1.3
 
-var cam_dir := Vector3.ZERO
+const PIVOT_H := 2.0
+const CAM_RADIUS := 0.3
+var cam_pivot := Vector3.INF
+var cam_zoom := 9.0
+var _fwd_input := 0.0
+var _cam_shape: SphereShape3D
 
-## How far the camera can sit from the pivot along dir before it would be inside rock.
-func _cam_room(pivot: Vector3, dir: Vector3, ceil: float) -> float:
-	var d := 0.5
-	while d <= cam_dist:
-		var p := pivot + dir * d
-		if p.y > ceil:
-			p.y = ceil
-		if lv.solid_at(p.x, p.z, 0.6) or p.y < lv.floor_y(p.x, p.z) + 0.4:
-			return maxf(d - 0.4, 0.8)
-		d += 0.25
-	return cam_dist
+## How far the camera can sit from the pivot along dir: a sphere swept against collision layer 2.
+func _cam_sweep(pivot: Vector3, dir: Vector3, dist: float) -> float:
+	if _cam_shape == null:
+		_cam_shape = SphereShape3D.new()
+		_cam_shape.radius = CAM_RADIUS
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = _cam_shape
+	q.transform = Transform3D(Basis(), pivot)
+	q.motion = dir * dist
+	q.collision_mask = WorldBuilder.CAMERA_LAYER
+	var r := get_world_3d().direct_space_state.cast_motion(q)
+	var d := dist * r[0]
+	# never inside the floor either
+	var floor_t := (pivot.y - lv.floor_y(pivot.x, pivot.z) - 0.4) / maxf(-dir.y, 0.001) if dir.y < 0 else INF
+	return clampf(minf(d, floor_t), 0.4, dist)
 
 # ------------------------------------------------------------------ effects
 func _float_text(id: int, text: String, style: String) -> void:
@@ -640,10 +642,14 @@ func _ring(p: Vector3, color: Color, r: float) -> void:
 	mi.material_override = m
 	add_child(mi)
 	mi.global_position = p
-	mi.scale = Vector3(0.5, 0.15, 0.5)
+	mi.scale = Vector3(1, 0.3, 1)
+	# grow the radius, not the scale, so the band stays thin (a scaled torus turns into a fat glowing donut)
+	var grow := func(k: float):
+		tm.outer_radius = maxf(0.3, r * k)
+		tm.inner_radius = maxf(0.1, r * k - 0.35)
 	var tw := create_tween()
 	tw.set_parallel()
-	tw.tween_property(mi, "scale", Vector3(r, 0.15, r), 0.45).set_ease(Tween.EASE_OUT)
+	tw.tween_method(grow, 0.05, 1.0, 0.45).set_ease(Tween.EASE_OUT)
 	tw.tween_property(m, "albedo_color:a", 0.0, 0.45)
 	tw.chain().tween_callback(mi.queue_free)
 

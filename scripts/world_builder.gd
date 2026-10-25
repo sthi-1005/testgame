@@ -11,6 +11,9 @@ var bell_pivot: Node3D
 
 static var _tex := {}
 
+## Physics layer the gameplay camera collides with (bit value). Solid walls, ceilings and big rocks go here.
+const CAMERA_LAYER := 2
+
 func _init(level: Level, parent: Node3D) -> void:
 	lv = level
 	root = Node3D.new()
@@ -105,6 +108,7 @@ func build() -> void:
 		mi.mesh = pm
 		mi.material_override = ceil_mat
 		_place(mi, Vector3((r[0] + r[2] + 1) * T / 2, lv.zone_h(r[4]), (r[1] + r[3] + 1) * T / 2), 0.0, 1.0)
+		_camera_box(Vector3((r[0] + r[2] + 1) * T / 2, lv.zone_h(r[4]) + 0.5, (r[1] + r[3] + 1) * T / 2), Vector3(w, 1.0, d), 0.0)
 	var wood := Look.toon(Color("#6a4529"), null, 0.03)
 	for e in lv.decor:
 		match e.kind:
@@ -118,6 +122,7 @@ func build() -> void:
 				else:
 					for k in e.courses:
 						_place(Assets.prop("dungeon-wall"), e.pos + Vector3(0, k * 4.0, 0), e.rot, 1.0)
+					_camera_box(e.pos + Vector3(0, e.courses * 2.0, 0), Vector3(T + 0.4, e.courses * 4.0, 1.0), e.rot)
 			"prop":
 				if e.model == "dungeon-pillar" and _cave_corner(e.pos):
 					continue # bare rock instead of masonry columns in the mine
@@ -125,16 +130,21 @@ func build() -> void:
 					_place(Assets.prop("q_rock_tall", 0.04), e.pos, e.rot, Vector3(2.4, 3.2, 2.4))
 					continue
 				_place(Assets.prop(e.model), e.pos, e.rot, e.scale)
+				if e.model == "dungeon-pillar":
+					var ps: Vector3 = e.scale if e.scale is Vector3 else Vector3.ONE * e.scale
+					_camera_box(e.pos + Vector3(0, ps.y * 2.0, 0), Vector3(1.5 * ps.x, ps.y * 4.0, 1.5 * ps.z), e.rot)
 			"timber":
 				_box(e.pos, e.scale, wood, e.rot)
 			"torch":
 				_place(Assets.prop("dungeon-torch"), e.pos, e.rot, e.scale)
 				fire_at(e.flame, 1.1)
-				light_sources.append({ "pos": e.light, "color": Color(1, 0.62, 0.35), "range": 22.0, "energy": 2.0 })
+				# keep the camera out of the flame: up close the light blows out the volumetric fog
+				_camera_box(e.flame, Vector3(1.8, 1.8, 1.8), 0.0)
+				light_sources.append({ "pos": e.light, "color": Color(1, 0.62, 0.35), "range": 18.0, "energy": 1.3 })
 			"brazier":
 				_place(Assets.prop(e.model), e.pos, e.rot, e.scale)
 				fire_at(e.pos + Vector3(0, 1.4, 0), 2.2)
-				light_sources.append({ "pos": e.pos + Vector3(0, 3, 0), "color": Color(1, 0.55, 0.25), "range": 24.0, "energy": 1.8 })
+				light_sources.append({ "pos": e.pos + Vector3(0, 3, 0), "color": Color(1, 0.55, 0.25), "range": 16.0, "energy": 1.0 })
 			"light":
 				light_sources.append({ "pos": e.pos, "color": e.color, "range": e.range, "energy": e.energy })
 			"daylight":
@@ -174,7 +184,31 @@ func build() -> void:
 		mi.material_override = rock
 		mi.name = "Cave_" + zn
 		root.add_child(mi)
+		add_camera_collider(mi)
 	_dress()
+
+## Give a mesh a trimesh body on the camera layer, so the camera can't swing through it.
+static func add_camera_collider(mi: MeshInstance3D) -> void:
+	var body := StaticBody3D.new()
+	body.collision_layer = CAMERA_LAYER
+	body.collision_mask = 0
+	var cs := CollisionShape3D.new()
+	cs.shape = mi.mesh.create_trimesh_shape()
+	body.add_child(cs)
+	mi.add_child(body)
+
+func _camera_box(pos: Vector3, size: Vector3, rot: float) -> void:
+	var body := StaticBody3D.new()
+	body.collision_layer = CAMERA_LAYER
+	body.collision_mask = 0
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = size
+	cs.shape = bs
+	body.add_child(cs)
+	root.add_child(body)
+	body.position = pos
+	body.rotation.y = rot
 
 func fire_at(p: Vector3, size: float) -> void:
 	var ps := CPUParticles3D.new()
@@ -313,6 +347,7 @@ class LightPool:
 			var l := OmniLight3D.new()
 			l.shadow_enabled = false
 			l.omni_attenuation = 1.4
+			l.light_volumetric_fog_energy = 0.5 # full strength glares when the camera passes close to a flame
 			parent.add_child(l)
 			lights.append(l)
 	func update(focus: Vector3, t: float) -> void:
@@ -383,12 +418,12 @@ func _stalactites(r: Array, h: float, cave: Cave) -> void:
 func _dress() -> void:
 	var T := Level.T
 	# rails down the entrance tunnel and across the diggings
-	_rail_z(4.0 * T, 15.0 * T, 27.0 * T)
-	_rail_x(10 * T, 15 * T, 10.9 * T)
-	_rail_x(20 * T, 23 * T, 9.9 * T)
+	_rail_z(3.5 * T, 15.0 * T, 27.0 * T)
+	_rail_x(10 * T, 15 * T, 10.5 * T)
+	_rail_x(21 * T, 23 * T, 9.5 * T)
 	# lanterns hanging from the timber frames
 	for e in lv.decor:
-		if e.kind == "timber" and e.pos.y > 6 and e.pos.y < 7 and (e.scale.x > 6 or e.scale.z > 6) and randf() < 0.6:
+		if e.kind == "timber" and e.pos.y > 6.5 and e.pos.y < 7.5 and (e.scale.x > 6 or e.scale.z > 6) and randf() < 0.6:
 			var p: Vector3 = e.pos + Vector3(0, -1.3, 0)
 			_lantern(p)
 	# glowing ore crystals in the diggings and the sorting cave
@@ -400,7 +435,7 @@ func _dress() -> void:
 		light_sources.append({ "pos": p + Vector3(0, 1.5, 0), "color": c[2], "range": 9.0, "energy": 1.4, "flicker": false })
 	# loose rubble and planks along the tunnel walls (small enough to ignore for collision)
 	for z in range(15, 27):
-		for side in [3.0 * T + 0.5, 5.0 * T - 0.5]:
+		for side in [2.0 * T + 0.5, 5.0 * T - 0.5]:
 			if randf() < 0.5:
 				var m: String = ["k_Stone_Chunks_Small", "k_Rock_1_A_Color1", "k_Rock_2_A_Color1"][randi() % 3]
 				_place(Assets.prop(m), Vector3(side + randf_range(-0.2, 0.2), 0, z * T + randf() * T), randf() * TAU, randf_range(0.6, 1.0))

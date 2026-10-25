@@ -187,8 +187,8 @@ static func make_environment() -> Environment:
 	e.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 	e.glow_enabled = true
 	e.glow_intensity = 0.7
-	e.glow_bloom = 0.05
-	e.glow_hdr_threshold = 1.0
+	e.glow_bloom = 0.0
+	e.glow_hdr_threshold = 1.3
 	e.adjustment_enabled = true
 	# Forward+ only (ignored by the web/Compatibility build): volumetric fog, ambient occlusion, GI
 	e.volumetric_fog_enabled = true
