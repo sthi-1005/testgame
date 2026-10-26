@@ -18,11 +18,12 @@ const SPRINT_K := 1.45 # sprint speed multiplier
 const BLOCK_SPEED_K := 0.55
 const ACTS := {
 	# cost, lock = seconds before the next action or free movement, hit = when the blow lands, dmg = x weapon roll
-	"light": { "cost": 18.0, "lock": 0.62, "hit": 0.26, "dmg": 0.7, "arc": 1.1, "reach": 1.4 },
-	"heavy": { "cost": 30.0, "lock": 1.05, "hit": 0.55, "dmg": 1.6, "arc": 1.35, "reach": 1.9, "stagger": 0.7 },
+	# move = how fast you can keep walking through it (basic attacks never root you)
+	"light": { "cost": 18.0, "lock": 0.62, "hit": 0.26, "dmg": 0.7, "arc": 1.1, "reach": 1.4, "move": 0.85 },
+	"heavy": { "cost": 30.0, "lock": 1.05, "hit": 0.55, "dmg": 1.6, "arc": 1.35, "reach": 1.9, "stagger": 0.7, "move": 0.6 },
 	"roll": { "cost": 18.0, "lock": 0.55, "dist": 5.0, "iframe": 0.42 },
 	"backstep": { "cost": 12.0, "lock": 0.36, "dist": 2.6, "iframe": 0.22 },
-	"parry": { "cost": 14.0, "lock": 0.6, "window": 0.28 },
+	"parry": { "cost": 14.0, "lock": 0.6, "window": 0.28, "move": 0.5 },
 }
 # casters throw a bolt instead of swinging: light is quick, heavy is a charged blast
 const BOLT := { "light": { "dmg": [14, 19], "speed": 30.0, "size": 0.35 }, "heavy": { "dmg": [34, 44], "speed": 24.0, "size": 0.6 } }

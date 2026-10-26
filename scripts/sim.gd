@@ -245,6 +245,7 @@ func deal_damage(src: SUnit, t: SUnit, amt: float, o := {}) -> float:
 	var dodgeable: bool = o.get("can_crit", true) # ticks (burns, the tide) can't be rolled through or blocked
 	if t.iframe > 0 and dodgeable and src != t:
 		float_text(t, "Dodged", "abs")
+		ev(["hurt", t.id, src.id if src else 0, "dodge", false])
 		return 0.0
 	var front := src != null and src != t and absf(angle_difference(t.yaw, atan2(src.pos.x - t.pos.x, src.pos.z - t.pos.z))) < 1.4
 	if t.parry_t > 0 and o.get("melee", false) and front:
@@ -264,6 +265,7 @@ func deal_damage(src: SUnit, t: SUnit, amt: float, o := {}) -> float:
 			t.spend(stopped)
 			a -= stopped
 			float_text(t, "Blocked", "abs")
+			ev(["hurt", t.id, src.id, "block", amt > t.max_hp * 0.12])
 			fx("hit", t.pos + t.fwd() * 0.6 + Vector3(0, 1.4, 0), { "color": Color(0.9, 0.85, 0.7) })
 			sfx("block", t.pos)
 		else:
@@ -287,6 +289,8 @@ func deal_damage(src: SUnit, t: SUnit, amt: float, o := {}) -> float:
 			if not w.is_empty():
 				w.t = 0.0
 	t.hp -= a
+	if a > 0 and o.get("can_crit", true) and not t.blocking:
+		ev(["hurt", t.id, src.id if src else 0, "hit", o.get("heavy", false) or crit or a > t.max_hp * 0.12])
 	if src and src.team == "party" and src.peer:
 		stats.dmg[src.peer] = stats.dmg.get(src.peer, 0.0) + a
 	if a > 0:
@@ -742,8 +746,12 @@ func tick_unit(u: SUnit, dt: float) -> void:
 				u.play("attack2" if big else "attack", 0.8 if u.boss != "" else 0.85)
 				if u.boss == "":
 					u.busy = maxf(u.busy, wind + 0.15)
+				ev(["wind", u.id, wind, D.MELEE + 1.0 + u.r, 1.3, big])
 				later(wind, func():
-					if u.dead or t.dead or u.stun > 0 or u.dist_to(t) > D.MELEE + 1.0:
+					if u.dead or u.stun > 0:
+						return
+					ev(["swoosh", u.id, u.yaw, D.MELEE * 0.7 + u.r, 1.3, big])
+					if t.dead or u.dist_to(t) > D.MELEE + 1.0:
 						return
 					if absf(angle_difference(u.yaw, atan2(t.pos.x - u.pos.x, t.pos.z - u.pos.z))) > 1.3:
 						return
@@ -1647,13 +1655,14 @@ func _melee_act(u: SUnit, kind: String, a: Dictionary) -> void:
 	later(a.hit, func():
 		if u.dead or u.stun > 0:
 			return
+		ev(["swoosh", u.id, u.yaw, D.MELEE * 0.6 + a.reach, a.arc, kind == "heavy"])
 		var hit := false
 		for e in enemies.duplicate():
 			if not e.alive() or u.dist_to(e) > D.MELEE * 0.6 + a.reach:
 				continue
 			if absf(angle_difference(u.yaw, atan2(e.pos.x - u.pos.x, e.pos.z - u.pos.z))) > a.arc:
 				continue
-			deal_damage(u, e, wpn * a.dmg, { "threat": 1.5 })
+			deal_damage(u, e, wpn * a.dmg, { "threat": 1.5, "heavy": kind == "heavy" })
 			_impact(e, Color(1, 0.9, 0.7))
 			if a.has("stagger") and e.boss == "" and e.alive():
 				e.stun = maxf(e.stun, a.stagger)
@@ -1697,6 +1706,7 @@ func aim_target(u: SUnit) -> SUnit:
 
 func _parried(t: SUnit, src: SUnit) -> void:
 	float_text(src, "Parried!", "crit")
+	ev(["hurt", t.id, src.id, "parry", true])
 	fx("flash", t.pos + t.fwd() * 0.8 + Vector3(0, 1.4, 0), { "color": Color(1, 0.9, 0.6), "energy": 3.0, "dur": 0.25, "range": 8.0 })
 	fx("hit", t.pos + t.fwd() * 0.8 + Vector3(0, 1.4, 0), { "color": Color(1, 0.95, 0.7) })
 	sfx("block", t.pos)

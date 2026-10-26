@@ -39,6 +39,17 @@ var yaw := 0.0
 var fly := 0.0
 var detail := {} # cooldowns and buffs (party only)
 
+# hit feedback (client only): an overlay flash, a knockback nudge, a hitstop freeze
+var meshes: Array = []
+var flash_mat: StandardMaterial3D
+var flash := 0.0
+var flash_col := Color.WHITE
+var windup := 0.0 # an enemy winding up glows red, brighter as the blow nears
+var windup_dur := 0.0
+var kick := Vector3.ZERO
+var freeze := 0.0
+var overlay_on := false
+
 # interpolation buffer: [server_time, pos, yaw]
 var buf: Array = []
 
@@ -56,6 +67,13 @@ func setup(i: Dictionary) -> void:
 	anim = c.anim
 	add_child(model)
 	anim.animation_finished.connect(_on_anim_done)
+	flash_mat = StandardMaterial3D.new()
+	flash_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flash_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	flash_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	flash_mat.albedo_color = Color(1, 1, 1, 0)
+	for mi in model.find_children("*", "MeshInstance3D", true, false):
+		meshes.append(mi)
 	var gem := model.find_child("Gem", true, false)
 	if gem:
 		staff_gem = gem
@@ -218,6 +236,47 @@ func _show_guard(on: bool) -> void:
 	elif not on and guard:
 		guard.queue_free()
 		guard = null
+
+## Struck: flash the model, nudge it away from the blow and freeze both fighters' animation a beat.
+func struck(kind: String, from: Vector3, heavy: bool) -> void:
+	match kind:
+		"hit": flash_col = Color(1, 0.95, 0.85)
+		"block": flash_col = Color(0.6, 0.8, 1)
+		"parry": flash_col = Color(1, 0.85, 0.35)
+		_: flash_col = Color(0.7, 0.7, 1)
+	flash = 1.0 if kind != "dodge" else 0.5
+	if kind == "hit" or kind == "block":
+		var away := Vector3(position.x - from.x, 0, position.z - from.z)
+		if away.length() > 0.01:
+			kick = away.normalized() * ((0.75 if heavy else 0.4) if kind == "hit" else 0.25)
+		freeze = maxf(freeze, 0.11 if heavy else 0.065)
+
+func wind_up(dur: float) -> void:
+	windup = dur
+	windup_dur = dur
+
+func tick_fx(delta: float) -> void:
+	if freeze > 0:
+		freeze -= delta
+		anim.speed_scale = 0.03 if freeze > 0 else 1.0
+	kick = kick.lerp(Vector3.ZERO, clampf(delta * 9.0, 0, 1))
+	model.position.x = kick.x
+	model.position.z = kick.z
+	windup = maxf(0.0, windup - delta)
+	flash = maxf(0.0, flash - delta * 4.5)
+	var a := flash * 0.6
+	var col := flash_col
+	if windup > 0 and flash <= 0:
+		var k := 1.0 - windup / maxf(windup_dur, 0.01)
+		a = 0.12 + 0.45 * k * k + 0.15 * sin(Time.get_ticks_msec() * 0.03)
+		col = Color(1, 0.25, 0.1)
+	var on := a > 0.01
+	if on:
+		flash_mat.albedo_color = Color(col, a)
+	if on != overlay_on:
+		overlay_on = on
+		for mi in meshes:
+			(mi as GeometryInstance3D).material_overlay = flash_mat if on else null
 
 ## Keep something playing: a clip that ends with nothing queued leaves the model in its bind pose.
 func keep_playing() -> void:

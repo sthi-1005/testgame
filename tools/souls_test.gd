@@ -164,6 +164,20 @@ func _run() -> void:
 	await _frames(70)
 	_check(foe.hp < ehp and game.buffered == "", "a buffered second swing came out too")
 	await _frames(20)
+	# basic attacks don't root you: walk while swinging
+	su.stam = D.STAMINA
+	game.act_lock = 0
+	await _frames(30)
+	start = game.my_pos
+	_key(KEY_S, true)
+	await _frames(2)
+	_mouse(MOUSE_BUTTON_LEFT, true)
+	_mouse(MOUSE_BUTTON_LEFT, false)
+	await _frames(20)
+	_check(game.act_lock > 0 and (game.my_pos - start).length() > 1.0, "kept moving through a light attack (%.1f m)" % (game.my_pos - start).length())
+	_key(KEY_S, false)
+	_beside(foe, su)
+	await _frames(40)
 	# heavy: Shift+LMB
 	su.stam = D.STAMINA
 	foe.hp = foe.max_hp
@@ -182,9 +196,11 @@ func _run() -> void:
 	await _frames(3)
 	_check(su.blocking, "RMB raises the guard")
 	hp0 = su.hp
+	su.absorb = 0 # an AI cleric's ward would soak the test blows
 	dealt = sim.deal_damage(foe, su, 40, { "melee": true, "crit": 0.0 })
 	_check(dealt > 0 and dealt <= sim.mitigate(su, 40) * (1.0 - su.guard) + 1 and su.stam < D.STAMINA, "a blocked blow did %.0f and cost %.0f stamina" % [dealt, D.STAMINA - su.stam])
 	su.stam = 1.0
+	su.absorb = 0
 	dealt = sim.deal_damage(foe, su, 40, { "melee": true, "crit": 0.0 })
 	_check(su.stun > 0 and not su.blocking and dealt > 15, "with no stamina left the guard breaks")
 	_mouse(MOUSE_BUTTON_RIGHT, false)
