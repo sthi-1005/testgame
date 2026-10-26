@@ -6,6 +6,7 @@ extends Node
 ##   --solo          : OfflineMultiplayerPeer
 ##   --stage id      : the stage to host (see stages/stages.gd)
 ##   --ws            : WebSocket transport
+##   --create [--room ABCD] / --room ABCD [--server-url ws://...] : online rooms on a dedicated --ws server
 
 var lv: Level = Stages.make_level(Stages.DEFAULT)
 var cls := "sellsword"
@@ -56,6 +57,11 @@ func _ready() -> void:
 		Net.transport = "ws"
 	if "--solo" in a:
 		Net.host_solo(cls)
+	elif "--create" in a:
+		# online room on a dedicated server; --room asks for that code so other bots can find it
+		Net.create_room(cls, _arg("--server-url", "ws://127.0.0.1:%d" % Net.DEFAULT_PORT), _arg("--room", ""))
+	elif "--room" in a:
+		Net.join_room(_arg("--room", ""), cls, _arg("--server-url", "ws://127.0.0.1:%d" % Net.DEFAULT_PORT))
 	elif "--host" in a:
 		Net.host(cls, int(_arg("--port", str(Net.DEFAULT_PORT))))
 	else:
@@ -165,5 +171,5 @@ func _process(delta: float) -> void:
 
 func _report() -> void:
 	var r: PackedFloat32Array = rows.get(me, PackedFloat32Array())
-	print("BOT %s peer=%d unit=%d snaps=%d (%.1f/s) events=%d snapbacks=%d targets_killed=%d rolls=%d hp=%s states=%s" % [cls, multiplayer.get_unique_id(), me,
+	print("BOT room=%s %s peer=%d unit=%d snaps=%d (%.1f/s) events=%d snapbacks=%d targets_killed=%d rolls=%d hp=%s states=%s" % [Net.room_code, cls, multiplayer.get_unique_id(), me,
 		st.snaps, st.snaps / maxf(0.01, t - first_snap), st.events, st.tp, st.kills, rolls, (str(r[5]) if r.size() else "?"), st.states])
