@@ -22,15 +22,17 @@ func _ready() -> void:
 		printerr(Net.last_error)
 		get_tree().quit(1)
 		return
-	Net.lobby_changed.connect(func(l): print("Net: lobby %s" % [l]))
-	print("Saltrock server listening on %s port %d" % [Net.transport, port])
+		print("Saltrock server listening on %s port %d" % [Net.transport, port])
 
 func _process(delta: float) -> void:
 	_stat_t += delta
-	if _stat_t < 10.0 or Net.transport != "enet" or Net.sim == null:
+	if _stat_t < 10.0 or Net.transport != "enet" or Net.rooms.is_empty():
 		return
 	var host: ENetConnection = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).host
 	var sent := host.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA)
 	var recv := host.pop_statistic(ENetConnection.HOST_TOTAL_RECEIVED_DATA)
-	print("Net: %d players, out %.1f KB/s, in %.1f KB/s, sim %s" % [Net.lobby.size(), sent / _stat_t / 1024.0, recv / _stat_t / 1024.0, Net.sim.state])
+	var players := 0
+	for r in Net.rooms.values():
+		players += r.lobby.size()
+	print("Net: %d rooms, %d players, out %.1f KB/s, in %.1f KB/s" % [Net.rooms.size(), players, sent / _stat_t / 1024.0, recv / _stat_t / 1024.0])
 	_stat_t = 0.0

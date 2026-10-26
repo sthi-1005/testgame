@@ -114,26 +114,59 @@ func _build_menu() -> void:
 	mrow.alignment = BoxContainer.ALIGNMENT_CENTER
 	mrow.add_theme_constant_override("separation", 10)
 	box.add_child(mrow)
+	# Online (a server is configured): Host makes a room with a shareable code. Otherwise Host runs a LAN
+	# party on this machine. The field takes a room code or, for LAN, an address.
+	var online: bool = net.online_server() != ""
+	var invited: String = net.launch_room()
 	var host := Button.new()
-	host.text = "Host a party"
-	host.custom_minimum_size = Vector2(170, 40)
-	host.pressed.connect(func(): _start_net(""))
+	host.text = "Host a party" if online else "Host on this PC (LAN)"
+	host.custom_minimum_size = Vector2(190, 40)
+	host.pressed.connect(func(): _start_net("", ""))
 	mrow.add_child(host)
 	var addr := LineEdit.new()
-	addr.placeholder_text = "host address, e.g. 192.168.1.20"
-	addr.custom_minimum_size = Vector2(280, 40)
+	addr.placeholder_text = "room code, e.g. KTRM" if online else "room code or LAN address"
+	addr.custom_minimum_size = Vector2(260, 40)
+	addr.text = invited
 	mrow.add_child(addr)
 	var join := Button.new()
-	join.text = "Join"
-	join.custom_minimum_size = Vector2(110, 40)
-	join.pressed.connect(func(): _start_net(addr.text.strip_edges() if addr.text.strip_edges() != "" else "127.0.0.1"))
+	join.text = "Join party %s" % invited if invited != "" else "Join"
+	join.custom_minimum_size = Vector2(150, 40)
+	var do_join := func(_t = null):
+		var t := addr.text.strip_edges()
+		var code: String = net.normalize_code(t)
+		if code != "":
+			_start_net("", code)
+		else:
+			_start_net(t if t != "" else "127.0.0.1", "")
+	join.pressed.connect(do_join)
+	addr.text_submitted.connect(do_join)
+	addr.text_changed.connect(func(t):
+		var c: String = net.normalize_code(t)
+		join.text = "Join party %s" % c if c != "" else "Join")
 	mrow.add_child(join)
+	if invited != "":
+		var inv := Label.new()
+		inv.text = "You're invited to party %s. Pick a class, then tap Join." % invited
+		inv.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		inv.add_theme_color_override("font_color", Color("#ffcf80"))
+		box.add_child(inv)
 
-## Host (addr == "") or join a networked party. The lobby sits on top of the game until the run starts.
-func _start_net(addr: String) -> void:
+## Host or join a networked party: a room code joins an online room, an address joins a LAN host, and
+## neither hosts (an online room when a server is configured, else on this PC). The lobby sits on top of
+## the game until the run starts.
+func _start_net(addr: String, code: String) -> void:
 	var net := get_node("/root/Net")
 	net.stage = stage
-	var err: Error = net.host(cls) if addr == "" else net.join(addr, cls)
+	var hosting := addr == "" and code == ""
+	var err: Error
+	if code != "":
+		err = net.join_room(code, cls)
+	elif addr != "":
+		err = net.join(addr, cls)
+	elif net.online_server() != "":
+		err = net.create_room(cls)
+	else:
+		err = net.host(cls)
 	if err != OK:
 		return
 	menu.queue_free()
@@ -149,9 +182,22 @@ func _start_net(addr: String) -> void:
 	game.hud.add_child(lobby)
 	var v := VBoxContainer.new()
 	lobby.add_child(v)
+	var code_lbl := Label.new()
+	code_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	code_lbl.add_theme_font_size_override("font_size", 44)
+	code_lbl.add_theme_color_override("font_color", Color("#ffcf80"))
+	code_lbl.visible = false
+	v.add_child(code_lbl)
 	var info := Label.new()
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD
 	v.add_child(info)
+	var share := Button.new()
+	share.text = "Copy invite link"
+	share.visible = false
+	share.pressed.connect(func():
+		var sheet: bool = net.share_invite()
+		share.text = "Shared" if sheet else "Link copied")
+	v.add_child(share)
 	var start := Button.new()
 	start.text = "Start the run"
 	start.pressed.connect(func(): net.start_game())
@@ -159,20 +205,38 @@ func _start_net(addr: String) -> void:
 	var refresh := func(_x = null):
 		if not is_instance_valid(lobby):
 			return
-		var lines: Array = ["Hosting %s on port %d" % [Stages.info(net.stage).name, net.DEFAULT_PORT] if addr == "" else "Party at %s (%s)" % [addr, net.state], ""]
+		var lines: Array = []
+		if net.room_code != "":
+			lines.append("Send friends the invite link, or have them enter this code.")
+		elif hosting:
+			lines.append("Hosting %s on this PC. On the same Wi-Fi, friends join at %s" % [Stages.info(net.stage).name, _lan_address()])
+		else:
+			lines.append("Party at %s (%s)" % [addr if addr != "" else code, net.state])
+		lines.append("")
 		for p in net.lobby:
 			lines.append("%s  %s" % [D.CLASSES[p.cls].title if D.CLASSES.has(p.cls) else p.cls, "(leader)" if p == net.lobby[0] else ""])
 		if net.last_error != "":
 			lines.append("\n" + net.last_error)
 		info.text = "\n".join(lines)
 		start.visible = net.is_leader()
+		share.visible = net.room_code != ""
+		code_lbl.visible = net.room_code != ""
+		code_lbl.text = "Party %s" % net.room_code
 	net.lobby_changed.connect(refresh)
+	net.room_joined.connect(refresh)
 	net.state_changed.connect(func(st):
 		if st == "play" and is_instance_valid(lobby):
 			lobby.queue_free()
 		else:
 			refresh.call())
 	refresh.call()
+
+## This machine's private LAN IPv4 address, for friends on the same network.
+func _lan_address() -> String:
+	for a in IP.get_local_addresses():
+		if a.begins_with("192.168.") or a.begins_with("10.") or (a.begins_with("172.") and int(a.get_slice(".", 1)) >= 16 and int(a.get_slice(".", 1)) <= 31):
+			return a
+	return "this PC's address"
 
 func _start() -> void:
 	if menu:

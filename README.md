@@ -74,7 +74,15 @@ the same path: solo play runs over an `OfflineMultiplayerPeer`, and on a host th
 messages are plain calls instead of RPCs. The transport is ENet on native builds and WebSocket on web
 (`Net.transport`). A browser client needs a server started with `--ws`.
 
-- **Client API:** `host_solo(cls)`, `host(cls, port)`, `join("host[:port]", cls)`, `set_class(cls)`, `start_game()`
+- **Rooms and invites:** a dedicated server hosts up to 64 parties at once, each behind a 4-letter code (no I or
+  O). `create_room(cls)` opens one on the online server and fires `room_joined(code)`. `join_room(code, cls)` joins
+  one. `invite_link()` gives `https://sthi-1005.github.io/testgame/?room=CODE`, and `share_invite()` copies it,
+  opening the share sheet on phones. The web build reads `?room=` on start, prefills the code and offers "Join
+  party CODE". No IP is ever shown. The online server is `Net.DEFAULT_SERVER`, a `wss://` URL. While that's empty,
+  Host falls back to a LAN party on this PC, and the lobby shows the PC's LAN address. `?server=` in the page URL
+  (or `--server-url`, with `--room`, on native) overrides it for testing.
+- **Client API:** `host_solo(cls)`, `host(cls, port)`, `join("host[:port]" or ws/wss URL, cls)`, `create_room(cls)`,
+  `join_room(code, cls)`, `set_class(cls)`, `start_game()`
   (the party leader only), `leave()`. In play: `send_move(pos, yaw, dt)` (call every frame; it's sent at `D.TICK`
   and only when something changed), `send_use(ab, target_id)`, `send_target(id, attack)`, `send_loot()`.
 - **Signals:** `state_changed(offline|connecting|lobby|play|disconnected|failed)` (`Net.last_error` holds the
@@ -89,7 +97,7 @@ messages are plain calls instead of RPCs. The transport is ENet on native builds
   `despawn` event, so a lost packet can never make one vanish. Snapshots and moves are unreliable-ordered;
   events, actions and the lobby are reliable.
 - **Joins:** a mid-run join takes over the AI unit of the same class, or adds a new member. A player who leaves
-  hands their unit to the AI. When the last player leaves a dedicated server, it resets to the lobby.
+  hands their unit to the AI. When the last player leaves a room on a dedicated server, the room closes.
 
 Dedicated server (prints bandwidth every 10 s):
 
@@ -107,6 +115,7 @@ Network tests:
 godot --headless --path . res://tools/net_bot.tscn -- --solo --cls mage          # one bot client, solo
 tools/net_party.sh 60                     # dedicated server plus 5 bot clients on localhost
 LAG="60 15 0.03" tools/net_party.sh 60    # through tools/lagproxy.py: ~120 ms ping, ±15 ms jitter, 3% loss
+tools/net_rooms.sh 30                     # two parties on one --ws server (different stages) plus a wrong-code join
 ```
 
 Measured with 5 players on Godot 4.7.2: 30 snapshots/s at every client, zero snap-backs at 120 ms ping with 3% loss,
