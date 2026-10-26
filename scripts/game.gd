@@ -17,6 +17,8 @@ var env: Environment
 var cam: Camera3D
 var dust: CPUParticles3D
 var hud: Hud
+var sfx: Sfx
+var winds := {} # enemy id -> { node, mat, dur, t, glint } while it winds up a blow
 
 var views := {} # unit id -> UnitView
 var me_id := 0
@@ -67,6 +69,8 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.game = self
 	add_child(hud)
+	sfx = Sfx.new()
+	add_child(sfx)
 	Quality.apply(self)
 	if Quality.touch:
 		add_child(TouchControls.new(self))
@@ -234,6 +238,21 @@ func _on_events(evs: Array) -> void:
 			"shake":
 				if e[2] == 0 or e[2] == me_id:
 					shake_amt = maxf(shake_amt, e[1])
+			"sfx":
+				var at: Vector3 = e[2] if e[2] != Vector3.INF else my_pos
+				match e[1]:
+					"slam", "boom": sfx.play("slam", ground(at), 2.0)
+					"charge", "roar": sfx.play("heavy_swing", ground(at))
+			"wind":
+				_wind(e[1], e[2], e[3], e[4], e[5])
+			"swoosh":
+				_end_wind(e[1])
+				if e[1] != me_id:
+					var v: UnitView = views.get(e[1])
+					if v:
+						_swoosh(v, e[2], e[3], e[4], e[5])
+			"hurt":
+				_hurt(e[1], e[2], e[3], e[4])
 
 # ------------------------------------------------------------------ frame
 func _process(delta: float) -> void:
@@ -252,12 +271,14 @@ func _process(delta: float) -> void:
 		v.interpolate(render_t)
 		v.position.y += lv.floor_y(v.position.x, v.position.z)
 		v.keep_playing()
+		v.tick_fx(delta)
 		var near := v.position.distance_to(my_pos) < 32.0
 		v.plate.visible = not v.dead and (id == hover_id or id == target_id or (near and (v.is_enemy() and (v.flags & 2 != 0 or v.position.distance_to(my_pos) < 22.0))))
 	if me:
 		me.position = ground(my_pos)
 		me.model.rotation.y = my_yaw
 		me.keep_playing()
+		me.tick_fx(delta)
 	if OS.has_feature("web") and not Quality.touch:
 		# the browser drops pointer lock on Esc or a tab switch, and only grants it on a click
 		captured = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
@@ -325,14 +346,17 @@ func _physics_process(delta: float) -> void:
 		var spd := roll_dist / ROLL_MOVE_T
 		if roll_t > roll_total - ROLL_MOVE_T and can_move:
 			my_pos = lv.move_circle(my_pos, roll_dir.x * spd * delta, roll_dir.z * spd * delta, me.info.r)
-	elif can_move and act_lock <= 0:
-		if lt and not sprinting:
+	elif can_move and (act_lock <= 0 or swing_move > 0):
+		var swinging := act_lock > 0
+		if lt and not sprinting and not swinging:
 			my_yaw = lerp_angle(my_yaw, atan2(lt.position.x - my_pos.x, lt.position.z - my_pos.z), clampf(delta * 14.0, 0, 1))
 		if move_dir.length() > 0.05:
 			moving = true
-			if lt == null or sprinting:
+			if (lt == null or sprinting) and not swinging:
 				my_yaw = lerp_angle(my_yaw, atan2(move_dir.x, move_dir.z), clampf(delta * 12.0, 0, 1))
 			var spd: float = D.CLASSES[me.info.body].speed * (0.6 if flags & 16 else 1.0)
+			if swinging:
+				spd *= swing_move # you keep moving through a basic attack, a little slower, facing the blow
 			if sprinting:
 				spd *= D.SPRINT_K
 			elif blocking:
@@ -382,6 +406,7 @@ const BUFFER_T := 0.35 # a press during an attack or roll fires when it ends, if
 const ROLL_MOVE_T := 0.42
 const FLICK := 70.0
 var act_lock := 0.0
+var swing_move := 0.0 # speed multiplier while act_lock runs: 0 roots you (rolls), attacks keep you moving
 var buffered := ""
 var buffered_t := 0.0
 var roll_t := 0.0
@@ -484,7 +509,18 @@ func _act(kind: String) -> void:
 		me.play_act(anim, 1.8 if kind == "parry" else (1.5 if kind == "light" else 1.0))
 		me.local_act_ms = Time.get_ticks_msec()
 	act_lock = D.ACTS[kind].lock
+	swing_move = D.ACTS[kind].get("move", 0.0)
 	my_yaw = yaw
+	if kind in ["light", "heavy"]:
+		var melee: bool = D.CLASSES[me.info.body].melee
+		sfx.play("heavy_swing" if kind == "heavy" else "swing", ground(my_pos) + Vector3(0, 1.2, 0), -4.0 if melee else -8.0)
+		if melee:
+			var a: Dictionary = D.ACTS[kind]
+			get_tree().create_timer(a.hit, false, true).timeout.connect(func():
+				if me and not me.dead:
+					_swoosh(me, my_yaw, D.MELEE * 0.6 + a.reach, a.arc, kind == "heavy"))
+	elif kind == "roll" or kind == "backstep":
+		sfx.play("roll", ground(my_pos), -6.0)
 	net.send_move(my_pos, my_yaw, 0.0)
 	net.send_act(kind, yaw, tid)
 	hud.pressed(kind)
@@ -919,7 +955,7 @@ func _float_text(id: int, text: String, style: String) -> void:
 	l.no_depth_test = true
 	l.fixed_size = true
 	l.pixel_size = 0.0012
-	l.font_size = 30 if text.ends_with("!") else 22
+	l.font_size = 40 if text.ends_with("!") else 30
 	l.outline_size = 8
 	l.outline_modulate = Color(0, 0, 0, 0.85)
 	var col := Color(1, 1, 1)
@@ -1152,7 +1188,140 @@ func _proj(e: Array) -> void:
 	mi.add_child(trail)
 	projs[e[1]] = { "node": mi, "tgt": e[3], "speed": e[6], "color": col }
 
+# ------------------------------------------------------------------ attack readability
+## A fan on the ground in front of a winding-up enemy, filling red until the blow lands, a glint on it
+## just before the strike, and the enemy itself glowing hotter (UnitView.wind_up).
+func _wind(id: int, dur: float, reach: float, arc: float, big: bool) -> void:
+	var v: UnitView = views.get(id)
+	if v == null or v.dead:
+		return
+	_end_wind(id)
+	var mi := MeshInstance3D.new()
+	mi.mesh = _fan_mesh(0.6, reach, arc, 18, false)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.vertex_color_use_as_albedo = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.disable_fog = true
+	m.no_depth_test = false
+	m.albedo_color = Color(0.95, 0.12, 0.05, 0.0)
+	mi.material_override = m
+	add_child(mi)
+	v.wind_up(dur)
+	winds[id] = { "node": mi, "mat": m, "dur": dur, "t": 0.0, "glint": false, "big": big }
+	_place_wind(v, mi)
+
+func _place_wind(v: UnitView, mi: Node3D) -> void:
+	mi.global_position = v.global_position + Vector3(0, 0.09, 0)
+	mi.rotation.y = v.yaw
+
+func _end_wind(id: int) -> void:
+	var w = winds.get(id)
+	if w:
+		w.node.queue_free()
+		winds.erase(id)
+	var v: UnitView = views.get(id)
+	if v:
+		v.windup = 0.0
+
+## A bright arc where a weapon just went: in front of the attacker, chest high, sweeping and fading.
+func _swoosh(v: UnitView, yaw: float, reach: float, arc: float, heavy: bool) -> void:
+	var mi := MeshInstance3D.new()
+	mi.mesh = _fan_mesh(reach * 0.45, reach * (1.1 if heavy else 1.0), arc, 20, true)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.vertex_color_use_as_albedo = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.disable_fog = true
+	var col := Color(1, 0.7, 0.3) if heavy else Color(1, 1, 0.95)
+	if v.is_enemy():
+		col = Color(1, 0.45, 0.3)
+	m.albedo_color = Color(col, 0.9)
+	mi.material_override = m
+	add_child(mi)
+	mi.global_position = v.global_position + Vector3(0, v.height() * (0.42 if heavy else 0.5), 0)
+	mi.rotation = Vector3(0.2 if heavy else -0.15, yaw, 0.0) # heavy blows come down, light ones across
+	var dur := 0.3 if heavy else 0.22
+	var tw := create_tween()
+	tw.set_parallel()
+	tw.tween_property(m, "albedo_color:a", 0.0, dur).set_ease(Tween.EASE_IN)
+	tw.tween_property(mi, "rotation:y", yaw - 0.35, dur)
+	tw.chain().tween_callback(mi.queue_free)
+
+## A struck unit: flash, knockback and hitstop on the views, a shake if it involves you, and a sound.
+func _hurt(id: int, src_id: int, kind: String, heavy: bool) -> void:
+	var v: UnitView = views.get(id)
+	if v == null:
+		return
+	var src: UnitView = views.get(src_id)
+	var from := src.global_position if src else v.global_position - Vector3(sin(v.yaw), 0, cos(v.yaw))
+	v.struck(kind, from, heavy)
+	if src and kind in ["hit", "block"]:
+		src.freeze = maxf(src.freeze, 0.11 if heavy else 0.065)
+	var at := v.chest()
+	match kind:
+		"hit":
+			sfx.play("heavy_hit" if heavy else "hit", at)
+			if id == me_id:
+				shake_amt = maxf(shake_amt, 0.45 if heavy else 0.25)
+			elif src_id == me_id:
+				shake_amt = maxf(shake_amt, 0.22 if heavy else 0.1)
+		"block":
+			sfx.play("block", at)
+			_burst(at + (from - v.global_position).normalized() * 0.5, Color(1, 0.9, 0.6), 14, 4.0, 4.0, 0.15, 0.3)
+			if id == me_id:
+				shake_amt = maxf(shake_amt, 0.18)
+		"parry":
+			sfx.play("parry", at, 3.0)
+			_flash(at, Color(1, 0.9, 0.5), 4.0, 0.3, 10.0)
+			_ring(v.global_position + Vector3(0, 1.2, 0), Color(1, 0.85, 0.4), 3.0)
+			shake_amt = maxf(shake_amt, 0.3)
+		"dodge":
+			sfx.play("roll", at, -10.0, 1.4)
+
+## A flat fan (a slice of a ring) facing +z, spanning +-arc. trail=true fades it in along the sweep.
+static func _fan_mesh(r_in: float, r_out: float, arc: float, segs: int, trail: bool) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in segs:
+		var a0 := -arc + 2.0 * arc * i / segs
+		var a1 := -arc + 2.0 * arc * (i + 1) / segs
+		var k0 := float(i) / segs if trail else 1.0
+		var k1 := float(i + 1) / segs if trail else 1.0
+		var p := [Vector3(sin(a0), 0, cos(a0)) * r_in, Vector3(sin(a0), 0, cos(a0)) * r_out,
+			Vector3(sin(a1), 0, cos(a1)) * r_in, Vector3(sin(a1), 0, cos(a1)) * r_out]
+		# the outer edge glows brightest, the inner fades out
+		var c := [Color(1, 1, 1, k0 * 0.25), Color(1, 1, 1, k0), Color(1, 1, 1, k1 * 0.25), Color(1, 1, 1, k1)]
+		for q in [0, 1, 2, 2, 1, 3]:
+			st.set_color(c[q])
+			st.add_vertex(p[q])
+	return st.commit()
+
+func _update_winds(delta: float) -> void:
+	for id in winds.keys():
+		var w: Dictionary = winds[id]
+		var v: UnitView = views.get(id)
+		if v == null or v.dead or v.flags & 4 != 0:
+			_end_wind(id)
+			continue
+		w.t += delta
+		var k := clampf(w.t / w.dur, 0.0, 1.0)
+		(w.mat as StandardMaterial3D).albedo_color.a = 0.2 + 0.55 * k * k
+		w.node.global_position = v.global_position + Vector3(0, 0.09, 0)
+		if not w.glint and k > 0.7:
+			# the tell: a glint on the weapon arm a beat before it falls
+			w.glint = true
+			var hand := v.global_position + Vector3(sin(v.yaw) * 0.5 - cos(v.yaw) * 0.6, v.height() * 0.85, cos(v.yaw) * 0.5 + sin(v.yaw) * 0.6)
+			_burst(hand, Color(1, 0.95, 0.8), 10, 1.5, 0.0, 0.35, 0.25)
+			_flash(hand, Color(1, 0.6, 0.3), 2.5, 0.2, 6.0)
+			sfx.play("glint", hand, -2.0)
+		if w.t > w.dur + 0.3:
+			_end_wind(id)
+
 func _update_teles_projs(delta: float) -> void:
+	_update_winds(delta)
 	for id in teles:
 		var tl: Dictionary = teles[id]
 		tl.t += delta
