@@ -249,7 +249,7 @@ func _on_events(evs: Array) -> void:
 				_end_wind(e[1])
 				if e[1] != me_id:
 					var v: UnitView = views.get(e[1])
-					if v:
+					if v and not v.trail_ok:
 						_swoosh(v, e[2], e[3], e[4], e[5])
 			"hurt":
 				_hurt(e[1], e[2], e[3], e[4])
@@ -499,14 +499,15 @@ func _act(kind: String) -> void:
 				tid = soft.id
 		var anim := ""
 		match kind:
-			"light":
-				combo = (combo + 1) % 2
-				anim = ("attack" if combo == 0 else "attack2") if D.CLASSES[me.info.body].melee else "release"
-			"heavy":
-				anim = "smash" if D.CLASSES[me.info.body].melee else "release"
+			"light", "heavy":
+				if kind == "light":
+					combo = (combo + 1) % 2
+				var mel: bool = D.CLASSES[me.info.body].melee
+				anim = Sim.act_anim(mel, mel and me.anim.has_animation("light1"), kind, combo if kind == "light" else 0)
 			"parry":
 				anim = "attack2"
-		me.play_act(anim, 1.8 if kind == "parry" else (1.5 if kind == "light" else 1.0))
+		var spd := 1.8 if kind == "parry" else (1.5 if kind == "light" and anim.begins_with("attack") else 1.0)
+		me.play_act(anim, spd)
 		me.local_act_ms = Time.get_ticks_msec()
 	act_lock = D.ACTS[kind].lock
 	swing_move = D.ACTS[kind].get("move", 0.0)
@@ -514,7 +515,7 @@ func _act(kind: String) -> void:
 	if kind in ["light", "heavy"]:
 		var melee: bool = D.CLASSES[me.info.body].melee
 		sfx.play("heavy_swing" if kind == "heavy" else "swing", ground(my_pos) + Vector3(0, 1.2, 0), -4.0 if melee else -8.0)
-		if melee:
+		if melee and not me.trail_ok: # posed attacks draw a weapon trail instead
 			var a: Dictionary = D.ACTS[kind]
 			get_tree().create_timer(a.hit, false, true).timeout.connect(func():
 				if me and not me.dead:

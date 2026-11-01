@@ -104,4 +104,5 @@ static func ability_ids() -> Array:
 		_ab_ids.append("potion")
 	return _ab_ids
 
-const ANIMS := ["idle", "combatIdle", "run", "walk", "back", "attack", "attack2", "smash", "cast", "release", "heal", "hit", "death", "yell", "spawn", "roll", "block"]
+const ANIMS := ["idle", "combatIdle", "run", "walk", "back", "attack", "attack2", "smash", "cast", "release", "heal", "hit", "death", "yell", "spawn", "roll", "block",
+	"light1", "light2", "slam", "hack", "stomp", "roar", "rush", "bash"] # the last row is built in code (scripts/poses.gd)

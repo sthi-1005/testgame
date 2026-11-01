@@ -125,6 +125,8 @@ static func library_for(body: String, model: Node) -> AnimationLibrary:
 					a.track_set_path(t, NodePath("%s:%s" % [sk_path, bone]))
 				lib.add_animation(wanted[clip], a)
 			src.free()
+		# attacks and skills built from key poses (scripts/poses.gd)
+		Poses.add_clips(lib, sk, sk_path)
 	else:
 		# the model carries its own clips (Quaternius)
 		var ap := model.find_children("*", "AnimationPlayer", true, false)
@@ -206,6 +208,8 @@ static func character(body: String) -> Dictionary:
 		old.get_parent().remove_child(old)
 		old.free()
 	var sk := skeleton_of(model)
+	if def.has("clips") and sk and sk.find_bone("head") >= 0:
+		sk.add_child(HeadScale.new()) # smaller heads: swings read better
 	# Quaternius rigs sit under a 100x armature node with centimetre meshes: scale the ink to match
 	var unit := 1.0
 	var n: Node = sk

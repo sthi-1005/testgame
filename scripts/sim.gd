@@ -561,14 +561,14 @@ func finish_ability(u: SUnit, ab: Dictionary, t: SUnit) -> void:
 			fx("burst", u.pos + Vector3(0, 1.3, 0), { "color": Color(1, 0.3, 0.25), "n": 20, "speed": 2.0, "gravity": 2.0 })
 			sfx("heal", u.pos)
 		"hack":
-			u.play("attack", 1.3)
+			u.play("hack" if _posed(u) else "attack", 1.0 if _posed(u) else 1.3)
 			_swing_at(u, t, func():
 				deal_damage(u, t, wpn * 1.5 + 6, { "threat": 2.4, "rage": false })
 				_impact(t, Color(1, 0.9, 0.7)))
 			u.swing = maxf(u.swing, 0.5)
 		"stomp":
-			u.play("smash", 1.4)
-			later(0.35, func():
+			u.play("stomp" if _posed(u) else "smash", 1.0 if _posed(u) else 1.4)
+			later(0.6 if _posed(u) else 0.35, func():
 				if u.dead:
 					return
 				for e in enemies:
@@ -581,6 +581,8 @@ func finish_ability(u: SUnit, ab: Dictionary, t: SUnit) -> void:
 				sfx("slam", u.pos))
 		"charge":
 			u.charging = { "t": t, "time": 0.0 }
+			if _posed(u):
+				u.play("rush", 1.0)
 			u.res = minf(100, u.res + 20)
 			u.driven = u.peer != 0
 			u.set_base("run", 1.6)
@@ -590,7 +592,7 @@ func finish_ability(u: SUnit, ab: Dictionary, t: SUnit) -> void:
 			fx("burst", u.pos + Vector3(0, 1.3, 0), { "color": Color(0.6, 0.8, 1), "n": 30, "speed": 3.0 })
 			sfx("buff", u.pos)
 		"roar":
-			u.play("yell", 1.2)
+			u.play("roar" if _posed(u) else "yell", 1.0 if _posed(u) else 1.2)
 			u.res = minf(100, u.res + 15)
 			for e in enemies:
 				if e.alive() and _d(e.pos, u.pos) < 14:
@@ -1276,8 +1278,8 @@ func update_charge(u: SUnit, dt: float) -> bool:
 		deal_damage(u, t, roll_weapon(u) * 0.5, { "threat": 2.5 })
 		fx("dust", t.pos, { "n": 14, "size": 0.8 })
 		shake(0.3, u)
-		u.play("attack", 1.3)
 		engage(t, u)
+		u.play("bash" if _posed(u) else "attack", 1.0 if _posed(u) else 1.3)
 		sfx("hit", t.pos)
 	return true
 
@@ -1647,10 +1649,7 @@ func act(u: SUnit, kind: String, yaw: float, t: SUnit = null) -> bool:
 
 func _melee_act(u: SUnit, kind: String, a: Dictionary) -> void:
 	u.combo = (u.combo + 1) % 2 if kind == "light" else 0
-	if kind == "heavy":
-		u.play("smash", 1.0)
-	else:
-		u.play("attack" if u.combo == 0 else "attack2", 1.5)
+	u.play(_act_anim(u, kind, u.combo), 1.0 if _posed(u) else (1.0 if kind == "heavy" else 1.5))
 	var wpn := roll_weapon(u)
 	later(a.hit, func():
 		if u.dead or u.stun > 0:
@@ -1667,7 +1666,26 @@ func _melee_act(u: SUnit, kind: String, a: Dictionary) -> void:
 			if a.has("stagger") and e.boss == "" and e.alive():
 				e.stun = maxf(e.stun, a.stagger)
 			hit = true
+		if kind == "heavy" and _posed(u):
+			fx("ring", u.pos + u.fwd() * 1.3 + Vector3(0, 0.15, 0), { "color": Color(0.95, 0.85, 0.6), "r": 2.4 })
 		sfx("hit" if hit else "swing", u.pos))
+
+## Melee player characters on the KayKit rig use the attacks built from key poses (scripts/poses.gd).
+func _posed(u: SUnit) -> bool:
+	return u.team == "party" and u.melee and D.CLASSES.has(u.kind)
+
+## The animation for a light or heavy attack (combo 0/1 alternates the two lights).
+static func act_anim(melee: bool, posed: bool, kind: String, combo: int) -> String:
+	if not melee:
+		return "release"
+	if kind == "heavy":
+		return "slam" if posed else "smash"
+	if posed:
+		return "light1" if combo == 1 else "light2"
+	return "attack" if combo == 0 else "attack2"
+
+func _act_anim(u: SUnit, kind: String, combo: int) -> String:
+	return act_anim(u.melee, _posed(u), kind, combo)
 
 func _bolt_act(u: SUnit, kind: String, a: Dictionary, t: SUnit) -> void:
 	if t == null or not hostile(u, t) or t.dead or _d(t.pos, u.pos) > D.AIM_RANGE + 4 or not lv.line_clear(u.pos, t.pos):
