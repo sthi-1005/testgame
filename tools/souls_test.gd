@@ -151,7 +151,13 @@ func _run() -> void:
 	s0 = su.stam
 	_mouse(MOUSE_BUTTON_LEFT, true)
 	_mouse(MOUSE_BUTTON_LEFT, false)
-	await _frames(20)
+	await _frames(10)
+	if su.melee:
+		_check(String(game.me.anim.current_animation) in ["light1", "light2"], "the light attack plays a pose-built swing (%s)" % game.me.anim.current_animation)
+		_check(game.me.trail_ok and game.me.trail_pts.size() > 0, "the swing draws a weapon trail (ok %s, %d points at %.2f s)" % [game.me.trail_ok, game.me.trail_pts.size(), game.me.anim.current_animation_position])
+	var hs := game.me.model.find_children("*", "HeadScale", true, false)
+	_check(hs.size() == 1, "the character's head is drawn smaller")
+	await _frames(10)
 	_check(foe.hp < ehp, "LMB light attack hit %s (%.0f -> %.0f)" % [foe.name, ehp, foe.hp])
 	_check(su.stam < s0, "the attack cost stamina")
 	# a second press during the swing is buffered and fires when it ends

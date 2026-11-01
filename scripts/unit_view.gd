@@ -49,6 +49,12 @@ var windup_dur := 0.0
 var kick := Vector3.ZERO
 var freeze := 0.0
 var overlay_on := false
+# weapon trail for the attacks built in scripts/poses.gd
+var trail_ok := false
+var trail_att: Node3D
+var trail_tip := Vector3.ZERO
+var trail_mi: MeshInstance3D
+var trail_pts: Array = [] # [base, tip, age]
 
 # interpolation buffer: [server_time, pos, yaw]
 var buf: Array = []
@@ -74,6 +80,7 @@ func setup(i: Dictionary) -> void:
 	flash_mat.albedo_color = Color(1, 1, 1, 0)
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
 		meshes.append(mi)
+	_setup_trail()
 	var gem := model.find_child("Gem", true, false)
 	if gem:
 		staff_gem = gem
@@ -277,6 +284,79 @@ func tick_fx(delta: float) -> void:
 		overlay_on = on
 		for mi in meshes:
 			(mi as GeometryInstance3D).material_overlay = flash_mat if on else null
+	_tick_trail(delta)
+
+func _setup_trail() -> void:
+	if not anim.has_animation("light1"):
+		return
+	for att in model.find_children("*", "BoneAttachment3D", true, false):
+		if att.bone_name != "handslot.r" or att.get_child_count() == 0:
+			continue
+		# the far end of the weapon: the bounds corner furthest from the grip
+		for m in att.find_children("*", "MeshInstance3D", true, false):
+			var mi := m as MeshInstance3D
+			var xf: Transform3D = (att as Node3D).global_transform.affine_inverse() * mi.global_transform if att.is_inside_tree() else _rel(att, mi)
+			var bb := mi.get_aabb()
+			for k in 8:
+				var q := xf * bb.get_endpoint(k)
+				if q.length() > trail_tip.length():
+					trail_tip = q
+		trail_att = att
+	if trail_att == null or trail_tip.length() < 0.2:
+		return
+	trail_ok = true
+	trail_mi = MeshInstance3D.new()
+	trail_mi.mesh = ImmediateMesh.new()
+	trail_mi.top_level = true
+	trail_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.vertex_color_use_as_albedo = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.disable_fog = true
+	trail_mi.material_override = m
+	add_child(trail_mi)
+
+## A node's transform relative to an ancestor, before either is in the tree.
+static func _rel(anc: Node, n: Node3D) -> Transform3D:
+	var t := Transform3D()
+	var c: Node = n
+	while c and c != anc:
+		if c is Node3D:
+			t = (c as Node3D).transform * t
+		c = c.get_parent()
+	return t
+
+## Ribbon behind the weapon's far end during a swing's trail window (Poses.TRAILS).
+func _tick_trail(delta: float) -> void:
+	if not trail_ok:
+		return
+	for p in trail_pts:
+		p[2] += delta
+	var cur := String(anim.current_animation)
+	if acting and Poses.TRAILS.has(cur) and not dead:
+		var w: Array = Poses.TRAILS[cur]
+		var at := anim.current_animation_position
+		if at >= w[0] and at <= w[1]:
+			var gx := trail_att.global_transform
+			trail_pts.append([gx * (trail_tip * 0.35), gx * trail_tip, 0.0])
+	while trail_pts.size() and trail_pts[0][2] > 0.22:
+		trail_pts.pop_front()
+	var im: ImmediateMesh = trail_mi.mesh
+	im.clear_surfaces()
+	if trail_pts.size() < 2:
+		return
+	var col := Color(1, 0.62, 0.2) if cur in ["slam", "hack", "stomp"] else Color(1, 1, 0.92)
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+	for i in trail_pts.size():
+		var p: Array = trail_pts[i]
+		var k: float = float(i) / (trail_pts.size() - 1) * (1.0 - p[2] / 0.22)
+		im.surface_set_color(Color(col, k * 0.25))
+		im.surface_add_vertex(p[0])
+		im.surface_set_color(Color(col, k * 0.95))
+		im.surface_add_vertex(p[1])
+	im.surface_end()
 
 ## Keep something playing: a clip that ends with nothing queued leaves the model in its bind pose.
 func keep_playing() -> void:

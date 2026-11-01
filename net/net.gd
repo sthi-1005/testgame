@@ -27,7 +27,7 @@ signal lobby_changed(lobby: Array) # [{ peer, cls }], leader first
 signal state_changed(state: String) # offline | connecting | lobby | play | disconnected | failed
 signal room_joined(code: String) # the room code is known (Net.room_code), so invite_link() works
 
-const PROTOCOL := 3 # 3: rooms (_c_hello carries a room request)
+const PROTOCOL := 4 # 3: rooms (_c_hello carries a room request); 4: more animation ids
 const DEFAULT_PORT := 24565
 ## The public game server that create_room()/join_room() use: a wss:// URL once one is hosted. Empty
 ## means online rooms are off; ?server= in the page URL or --server-url on the command line overrides it.
